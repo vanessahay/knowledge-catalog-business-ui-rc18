@@ -22,8 +22,6 @@ import {
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import ShieldIcon from '@mui/icons-material/Shield';
-import RuleIcon from '@mui/icons-material/Rule';
 import axios from 'axios';
 import { useAuth } from '../../auth/AuthProvider';
 
@@ -48,6 +46,7 @@ interface DimensionData {
   rulesPassed: number;
   rules: RuleDetail[];
   description: string;
+  productGcp?: string;
 }
 
 interface RC18Response {
@@ -56,6 +55,7 @@ interface RC18Response {
   dimensions: {
     accuracy: DimensionData;
     completeness: DimensionData;
+    reliability?: DimensionData;
   };
   scannedTables: string[];
   totalScansFound: number;
@@ -90,6 +90,7 @@ const RC18Dashboard: React.FC = () => {
 
   const accuracy = data?.dimensions?.accuracy;
   const completeness = data?.dimensions?.completeness;
+  const reliability = data?.dimensions?.reliability;
 
   return (
     <Box sx={{ width: '92%', maxWidth: '1400px', margin: '24px auto', paddingBottom: '40px' }}>
@@ -112,7 +113,7 @@ const RC18Dashboard: React.FC = () => {
             Resolução BCB nº 18/2025 - Painel de Qualidade de Dados
           </Typography>
           <Typography variant="subtitle1" sx={{ opacity: 0.9, marginTop: '6px', fontSize: '15px' }}>
-            Conformidade Regulatória do Banco Central do Brasil • Fonte: Dataplex Data Quality Scans (GCP)
+            Conformidade Regulatória do Banco Central do Brasil • Fonte: Dataplex Data Quality & Cloud Audit Logs (GCP)
           </Typography>
         </Box>
         <Button
@@ -141,14 +142,14 @@ const RC18Dashboard: React.FC = () => {
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px' }}>
-          <CircularProgress size={48} sx={{ color: '#022FCD' }} />
+          <CircularProgress size={48} sx={{ color: '#1A73E8' }} />
         </Box>
       ) : (
         <>
-          {/* Executive Overview Cards for Dimensions 1 & 2 */}
+          {/* Executive Overview Cards for Dimensions 1, 2 & 3 */}
           <Grid container spacing={3} sx={{ marginBottom: '32px' }}>
             {/* Dimensão 1: Acurácia */}
-            <Grid item xs={12} md={6}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <Card
                 sx={{
                   borderRadius: '16px',
@@ -214,7 +215,7 @@ const RC18Dashboard: React.FC = () => {
             </Grid>
 
             {/* Dimensão 2: Completude */}
-            <Grid item xs={12} md={6}>
+            <Grid size={{ xs: 12, md: 4 }}>
               <Card
                 sx={{
                   borderRadius: '16px',
@@ -278,6 +279,74 @@ const RC18Dashboard: React.FC = () => {
                 </CardContent>
               </Card>
             </Grid>
+
+            {/* Dimensão 3: Confiabilidade (Cloud Audit Logs) */}
+            <Grid size={{ xs: 12, md: 4 }}>
+              <Card
+                sx={{
+                  borderRadius: '16px',
+                  border: '1px solid #E0E0E0',
+                  boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
+                  transition: 'all 0.2s ease-in-out',
+                  '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }
+                }}
+              >
+                <CardContent sx={{ padding: '24px' }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                    <Box>
+                      <Chip
+                        label="Dimensão 3 • Conteúdo & Exatidão"
+                        size="small"
+                        sx={{ backgroundColor: '#FCE8E6', color: '#C5221F', fontWeight: 600, marginBottom: '8px' }}
+                      />
+                      <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
+                        Confiabilidade (Reliability)
+                      </Typography>
+                    </Box>
+                    <Box
+                      sx={{
+                        width: '56px',
+                        height: '56px',
+                        borderRadius: '50%',
+                        backgroundColor: (reliability?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      {(reliability?.scorePct ?? 0) >= 95 ? (
+                        <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
+                      ) : (
+                        <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
+                      )}
+                    </Box>
+                  </Box>
+
+                  <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
+                    {reliability?.scorePct ?? 100}%
+                  </Typography>
+
+                  <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
+                    {reliability?.description}
+                  </Typography>
+
+                  <Box sx={{ display: 'flex', gap: 2, borderTop: '1px solid #F1F3F4', paddingTop: '16px' }}>
+                    <Box>
+                      <Typography variant="caption" sx={{ color: '#70757A' }}>Fonte de Log</Typography>
+                      <Typography variant="body1" sx={{ fontWeight: 600, color: '#1A73E8' }}>
+                        Cloud Audit Logs
+                      </Typography>
+                    </Box>
+                    <Box sx={{ marginLeft: 'auto' }}>
+                      <Typography variant="caption" sx={{ color: '#70757A' }}>Regras Auditadas</Typography>
+                      <Typography variant="body1" sx={{ fontWeight: 600, color: '#137333' }}>
+                        {reliability?.rulesPassed || 0} / {reliability?.rulesEvaluated || 0}
+                      </Typography>
+                    </Box>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
           </Grid>
 
           {/* Details Tabs & Tables */}
@@ -297,6 +366,7 @@ const RC18Dashboard: React.FC = () => {
               >
                 <Tab label={`Dimensão 1: Acurácia (${accuracy?.rules?.length || 0} Regras)`} />
                 <Tab label={`Dimensão 2: Completude (${completeness?.rules?.length || 0} Regras)`} />
+                <Tab label={`Dimensão 3: Confiabilidade & Audit Logs (${reliability?.rules?.length || 0} Validações)`} />
               </Tabs>
             </Box>
 
@@ -362,6 +432,43 @@ const RC18Dashboard: React.FC = () => {
                               <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
                             ) : (
                               <Chip icon={<WarningIcon />} label="Falha" color="error" size="small" />
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+
+              {activeTab === 2 && (
+                <TableContainer>
+                  <Table sx={{ minWidth: 650 }}>
+                    <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 700 }}>Validação de Auditoria (Confiabilidade)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Atributo Auditado</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Tabela Base</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Trilha de Log (GCP)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Integridade Auditada (%)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Status de Auditoria</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {reliability?.rules?.map((rule, idx) => (
+                        <TableRow key={idx} hover>
+                          <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
+                          <TableCell>{rule.column}</TableCell>
+                          <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
+                          <TableCell>
+                            <Chip label="Cloud Audit Logs" size="small" sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8' }} />
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 700, color: '#137333' }}>{rule.passPercentage}%</TableCell>
+                          <TableCell>
+                            {rule.passed ? (
+                              <Chip icon={<CheckCircleIcon />} label="Sem Desvio" color="success" size="small" />
+                            ) : (
+                              <Chip icon={<WarningIcon />} label="Desvio Detectado" color="error" size="small" />
                             )}
                           </TableCell>
                         </TableRow>
