@@ -43,7 +43,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const token = credentialResponse.credential;
         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
-        let profile = { name: 'Desenvolvedor Local', email: 'dev@brb.com.br', picture: '' };
+        let profile = { name: 'Desenvolvedor Local', email: 'usuario.teste@empresa.com.br', picture: '' };
         if (!token.startsWith('mock-')) {
           try {
             const profileRes = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
