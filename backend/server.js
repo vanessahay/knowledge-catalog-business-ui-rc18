@@ -2122,12 +2122,17 @@ app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
     const parent = `projects/${projectId}/locations/${location}`;
     console.log(`[RC18] Fetching Dataplex DataScans for parent: ${parent}`);
 
-    const [scans] = await client.listDataScans({ parent });
-    const dqScans = (scans || []).filter(s => s.type === 'DATA_QUALITY' || s.dataQualitySpec);
-
     let accuracyRules = [];
     let completenessRules = [];
     let scannedTables = [];
+    let dqScans = [];
+
+    try {
+      const [scans] = await client.listDataScans({ parent });
+      dqScans = (scans || []).filter(s => s.type === 'DATA_QUALITY' || s.dataQualitySpec);
+    } catch (listErr) {
+      console.warn(`[RC18] Warning: listDataScans failed (${listErr.message}). Using fallback RC18 rule definitions.`);
+    }
 
     for (const scan of dqScans) {
       try {
