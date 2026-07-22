@@ -204,6 +204,7 @@ const Routing = () => {
             </SessionExpirationWrapper>
           </ProtectedRoute>
         }
+      />
       <Route
         path="/rc18-dashboard"
         element={
