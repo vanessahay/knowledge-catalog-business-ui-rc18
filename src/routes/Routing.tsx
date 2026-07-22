@@ -25,6 +25,7 @@ import Glossaries from '../component/Glossaries/Glossaries';
 import DataProducts from '../component/DataProducts/DataProducts';
 import DataProductsDetailView from '../component/DataProducts/DataProductsDetailView';
 import HomeComingSoon from '../component/Home/HomeComingSoon';
+import RC18Dashboard from '../component/RC18/RC18Dashboard';
 
 const Routing = () => {
   // state to hold the user object
@@ -199,6 +200,17 @@ const Routing = () => {
             <SessionExpirationWrapper>
               <Layout>
                 <DataProductsDetailView />
+              </Layout>
+            </SessionExpirationWrapper>
+          </ProtectedRoute>
+        }
+      <Route
+        path="/rc18-dashboard"
+        element={
+          <ProtectedRoute>
+            <SessionExpirationWrapper>
+              <Layout>
+                <RC18Dashboard />
               </Layout>
             </SessionExpirationWrapper>
           </ProtectedRoute>

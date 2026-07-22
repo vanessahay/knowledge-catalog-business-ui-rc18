@@ -25,6 +25,7 @@ const GlobalSidebar: React.FC = () => {
   const isGlossariesActive = location.pathname === '/glossaries';
   const isAnnotationsActive = location.pathname === '/browse-by-annotation';
   const isDataProductsActive = location.pathname.startsWith('/data-products');
+  const isRC18Active = location.pathname === '/rc18-dashboard';
 
   const handleSearchClick = () => {
     navigate('/home');
@@ -106,6 +107,13 @@ const GlobalSidebar: React.FC = () => {
           label="Data Products"
           isActive={isDataProductsActive}
           onClick={handleDataProducts}
+        />
+
+        <SidebarMenuItem
+          icon={<span className="material-symbols-outlined" style={{ fontSize: '24px' }}>shield</span>}
+          label="RC 18/2025"
+          isActive={isRC18Active}
+          onClick={() => navigate('/rc18-dashboard')}
         />
       </div>
 
