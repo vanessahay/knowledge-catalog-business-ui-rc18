@@ -9,8 +9,8 @@ on:
 env:
   GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
   GAR_LOCATION: 'us-central1'
-  SERVICE_NAME: 'cs-app'
-  REPOSITORY: 'data-studio-repo'
+  SERVICE_NAME: 'knowledge-catalog-ui-rc18'
+  REPOSITORY: 'cloud-run-source-deploy'
 
 jobs:
   deploy:
@@ -54,11 +54,10 @@ jobs:
           env_vars: |
             VITE_API_URL=/api
             VITE_API_VERSION=v1
-            VITE_ADMIN_EMAIL=YOUR_ADMIN_EMAIL
-            VITE_GOOGLE_PROJECT_ID=YOUR-GCP_PROJECT_ID
-            VITE_GOOGLE_CLIENT_ID=YOUR-GOOGLE-CLIENT-ID.apps.googleusercontent.com
-            VITE_GOOGLE_REDIRECT_URI=/auth/google/callback
-            GOOGLE_CLOUD_PROJECT_ID=YOUR-GCP_PROJECT_ID
+            VITE_GOOGLE_PROJECT_ID=${{ secrets.VITE_GOOGLE_PROJECT_ID }}
+            VITE_GOOGLE_CLIENT_ID=${{ secrets.VITE_GOOGLE_CLIENT_ID }}
+            VITE_GOOGLE_REDIRECT_URI=https://knowledge-catalog-ui-rc18-632617278139.us-central1.run.app
+            GOOGLE_CLOUD_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
             GCP_LOCATION=global
             GCP_REGION=global
 
