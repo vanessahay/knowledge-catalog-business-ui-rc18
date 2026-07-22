@@ -118,10 +118,17 @@ const LoginV2: React.FC = () => {
 
                 <button
                   className="loginv2-button"
-                  style={{ marginTop: '12px', backgroundColor: '#F1F3F4', color: '#1F1F1F', border: '1px solid #DADCE0' }}
+                  style={{
+                    marginTop: '12px',
+                    backgroundColor: '#1A73E8',
+                    borderColor: '#1A73E8',
+                    boxShadow: '0 2px 6px rgba(26, 115, 232, 0.3)'
+                  }}
                   onClick={handleDevLogin}
                 >
-                  <span className="loginv2-button-text">Entrar em Modo de Teste Local (RC18)</span>
+                  <span className="loginv2-button-text" style={{ color: '#FFFFFF', fontWeight: 600 }}>
+                    Entrar em Modo de Teste Local (RC18)
+                  </span>
                 </button>
               </>
             )}
