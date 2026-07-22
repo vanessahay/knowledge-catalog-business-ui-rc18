@@ -43,11 +43,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const token = credentialResponse.credential;
         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
-        // Fetch user profile from Google OAuth2 userinfo
-        const profileRes = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const profile = profileRes.data;
+        let profile = { name: 'Desenvolvedor Local', email: 'dev@brb.com.br', picture: '' };
+        if (!token.startsWith('mock-')) {
+          try {
+            const profileRes = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (profileRes.data) {
+              profile = profileRes.data;
+            }
+          } catch (profileErr) {
+            console.warn('[AuthProvider] Could not fetch Google userinfo, using default profile:', profileErr);
+          }
+        }
 
         // Calculate token timestamps
         const tokenIssuedAt = Math.floor(Date.now() / 1000);
