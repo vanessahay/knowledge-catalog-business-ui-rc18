@@ -92,8 +92,8 @@ const RC18Dashboard: React.FC = () => {
   // BigQuery Selection State
   const [datasets, setDatasets] = useState<DatasetOption[]>([]);
   const [tables, setTables] = useState<TableOption[]>([]);
-  const [selectedDataset, setSelectedDataset] = useState<string>('governance');
-  const [selectedTable, setSelectedTable] = useState<string>('dq_results');
+  const [selectedDataset, setSelectedDataset] = useState<string>('Summit_demo');
+  const [selectedTable, setSelectedTable] = useState<string>('transacao_cartao');
   const [loadingDatasets, setLoadingDatasets] = useState<boolean>(false);
   const [loadingTables, setLoadingTables] = useState<boolean>(false);
 
@@ -106,22 +106,22 @@ const RC18Dashboard: React.FC = () => {
       });
       if (response.data?.datasets) {
         setDatasets(response.data.datasets);
-        if (response.data.datasets.length > 0) {
-          const firstDs = response.data.datasets[0].id;
-          setSelectedDataset(firstDs);
-          fetchTables(firstDs);
-        }
+        // Prefer Summit_demo if present, otherwise first dataset
+        const hasSummit = response.data.datasets.some((d: any) => d.id === 'Summit_demo');
+        const targetDs = hasSummit ? 'Summit_demo' : (response.data.datasets[0]?.id || 'Summit_demo');
+        setSelectedDataset(targetDs);
+        fetchTables(targetDs);
       }
     } catch (err: any) {
       console.warn('Fallback loading BigQuery datasets:', err);
       const fallbackDs = [
-        { id: 'silver_banking', location: 'us-central1' },
-        { id: 'gold_financial_reporting', location: 'us-central1' },
-        { id: 'bronze_raw_ingestion', location: 'us-central1' }
+        { id: 'Summit_demo', location: 'us-central1' },
+        { id: 'governance', location: 'us-central1' },
+        { id: 'silver_banking', location: 'us-central1' }
       ];
       setDatasets(fallbackDs);
-      setSelectedDataset('silver_banking');
-      fetchTables('silver_banking');
+      setSelectedDataset('Summit_demo');
+      fetchTables('Summit_demo');
     } finally {
       setLoadingDatasets(false);
     }
@@ -136,19 +136,19 @@ const RC18Dashboard: React.FC = () => {
       });
       if (response.data?.tables) {
         setTables(response.data.tables);
-        if (response.data.tables.length > 0) {
-          setSelectedTable(response.data.tables[0].id);
-        }
+        const hasTransacao = response.data.tables.some((t: any) => t.id === 'transacao_cartao');
+        const targetTbl = hasTransacao ? 'transacao_cartao' : (response.data.tables[0]?.id || 'transacao_cartao');
+        setSelectedTable(targetTbl);
       }
     } catch (err: any) {
       console.warn(`Fallback loading tables for ${datasetId}:`, err);
       const fallbackTbls = [
-        { id: 'silver_clientes_v2', type: 'TABLE' },
-        { id: 'silver_contratos_portabilidade_v2', type: 'TABLE' },
-        { id: 'silver_bancos_v2', type: 'TABLE' }
+        { id: 'transacao_cartao', type: 'TABLE' },
+        { id: 'clientes', type: 'TABLE' },
+        { id: 'dq_results', type: 'TABLE' }
       ];
       setTables(fallbackTbls);
-      setSelectedTable('silver_clientes_v2');
+      setSelectedTable('transacao_cartao');
     } finally {
       setLoadingTables(false);
     }
@@ -252,8 +252,11 @@ const RC18Dashboard: React.FC = () => {
           backgroundColor: '#F8F9FA'
         }}
       >
-        <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '16px', color: '#1F1F1F', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <StorageIcon sx={{ color: '#1A73E8' }} /> Selecione a Tabela do BigQuery para Análise de Qualidade
+        <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '16px', color: '#1F1F1F', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <StorageIcon sx={{ color: '#1A73E8' }} /> Selecione a Tabela de Negócio Auditada no BigQuery
+        </Typography>
+        <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px', fontSize: '13px' }}>
+          Os resultados de qualidade são recuperados da tabela central de exportação do Dataplex (<strong>governance.dq_results</strong>).
         </Typography>
 
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
