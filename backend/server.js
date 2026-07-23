@@ -2313,23 +2313,41 @@ function getSampleDqResultsRows(projectId, datasetId, tableId) {
 app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
   try {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || 'vanessahay-477-20250108170134';
-    const selectedDataset = (req.query.dataset || 'governance').toString();
-    const selectedTable = (req.query.table || 'dq_results').toString();
+    const selectedDataset = (req.query.dataset || 'Summit_demo').toString();
+    const selectedTable = (req.query.table || 'transacao_cartao').toString();
 
-    console.log(`[RC18] Querying BigQuery DQ results table: \`${projectId}.${selectedDataset}.${selectedTable}\``);
+    // Central Data Quality scan export table in BigQuery (Dataplex DQ Export Destination)
+    const dqExportDataset = 'governance';
+    const dqExportTable = 'dq_results';
+
+    console.log(`[RC18] Querying Dataplex DQ Export table \`${projectId}.${dqExportDataset}.${dqExportTable}\` for audited table \`${selectedDataset}.${selectedTable}\``);
 
     let bqRows = [];
     try {
       const bigquery = new BigQuery({ projectId });
-      const query = `SELECT * FROM \`${projectId}.${selectedDataset}.${selectedTable}\` ORDER BY last_updated DESC LIMIT 1000`;
+      // Always query the central governance.dq_results table where all scan outputs are exported
+      const query = `SELECT * FROM \`${projectId}.${dqExportDataset}.${dqExportTable}\` ORDER BY last_updated DESC LIMIT 1000`;
       const [rows] = await bigquery.query({ query, location: 'us-central1' });
       bqRows = rows || [];
     } catch (bqErr) {
-      console.warn(`[RC18] Warning: BigQuery query to ${selectedDataset}.${selectedTable} failed (${bqErr.message}). Using sample DQ results.`);
+      console.warn(`[RC18] Warning: BigQuery query to ${dqExportDataset}.${dqExportTable} failed (${bqErr.message}). Using sample DQ export results.`);
     }
 
     if (bqRows.length === 0) {
       bqRows = getSampleDqResultsRows(projectId, selectedDataset, selectedTable);
+    }
+
+    // Filter scan result rows for the selected target dataset and table if specified
+    let filteredRows = bqRows;
+    if (selectedDataset !== 'governance' && selectedDataset !== 'all' && selectedTable !== 'dq_results' && selectedTable !== 'all') {
+      const matching = bqRows.filter(row => {
+        const ds = row.data_source || {};
+        return (!ds.dataset_id || ds.dataset_id.toLowerCase() === selectedDataset.toLowerCase()) &&
+               (!ds.table_id || ds.table_id.toLowerCase() === selectedTable.toLowerCase());
+      });
+      if (matching.length > 0) {
+        filteredRows = matching;
+      }
     }
 
     let accuracyRules = [];
@@ -2337,10 +2355,10 @@ app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
     let consistencyRules = [];
     let scannedSourceTables = new Set();
 
-    for (const row of bqRows) {
+    for (const row of filteredRows) {
       const dsInfo = row.data_source || {};
-      const sourceTable = dsInfo.table_id || 'transacao_cartao';
-      const sourceDataset = dsInfo.dataset_id || 'Summit_demo';
+      const sourceTable = dsInfo.table_id || selectedTable;
+      const sourceDataset = dsInfo.dataset_id || selectedDataset;
       const fullSourceTable = `${sourceDataset}.${sourceTable}`;
       scannedSourceTables.add(fullSourceTable);
 
