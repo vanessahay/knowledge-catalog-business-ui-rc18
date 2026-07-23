@@ -2449,7 +2449,7 @@ app.get('/', (req, res) => {
 });
 
 // For any other routes, serve the React index.html with no-cache headers
-app.get('*', (req, res) => {
+app.use((req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
