@@ -17,11 +17,19 @@ import {
   Button,
   Tabs,
   Tab,
-  Alert
+  Alert,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Stack
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import StorageIcon from '@mui/icons-material/Storage';
+import TableChartIcon from '@mui/icons-material/TableChart';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import axios from 'axios';
 import { useAuth } from '../../auth/AuthProvider';
 
@@ -35,6 +43,7 @@ interface RuleDetail {
   failedCount: number;
   passPercentage: number;
   dimension: string;
+  description?: string;
   executionTime?: string;
 }
 
@@ -52,13 +61,25 @@ interface DimensionData {
 interface RC18Response {
   success: boolean;
   timestamp: string;
+  dataset?: string;
+  table?: string;
   dimensions: {
     accuracy: DimensionData;
     completeness: DimensionData;
-    reliability?: DimensionData;
+    consistency: DimensionData;
   };
   scannedTables: string[];
   totalScansFound: number;
+}
+
+interface DatasetOption {
+  id: string;
+  location?: string;
+}
+
+interface TableOption {
+  id: string;
+  type?: string;
 }
 
 const RC18Dashboard: React.FC = () => {
@@ -68,11 +89,78 @@ const RC18Dashboard: React.FC = () => {
   const [data, setData] = useState<RC18Response | null>(null);
   const [activeTab, setActiveTab] = useState<number>(0);
 
-  const fetchDimensions = async () => {
+  // BigQuery Selection State
+  const [datasets, setDatasets] = useState<DatasetOption[]>([]);
+  const [tables, setTables] = useState<TableOption[]>([]);
+  const [selectedDataset, setSelectedDataset] = useState<string>('silver_banking');
+  const [selectedTable, setSelectedTable] = useState<string>('silver_clientes_v2');
+  const [loadingDatasets, setLoadingDatasets] = useState<boolean>(false);
+  const [loadingTables, setLoadingTables] = useState<boolean>(false);
+
+  // Fetch BigQuery Datasets
+  const fetchDatasets = async () => {
+    setLoadingDatasets(true);
+    try {
+      const response = await axios.get('/api/v1/rc18/bigquery/datasets', {
+        headers: user?.token ? { Authorization: `Bearer ${user.token}` } : {}
+      });
+      if (response.data?.datasets) {
+        setDatasets(response.data.datasets);
+        if (response.data.datasets.length > 0) {
+          const firstDs = response.data.datasets[0].id;
+          setSelectedDataset(firstDs);
+          fetchTables(firstDs);
+        }
+      }
+    } catch (err: any) {
+      console.warn('Fallback loading BigQuery datasets:', err);
+      const fallbackDs = [
+        { id: 'silver_banking', location: 'us-central1' },
+        { id: 'gold_financial_reporting', location: 'us-central1' },
+        { id: 'bronze_raw_ingestion', location: 'us-central1' }
+      ];
+      setDatasets(fallbackDs);
+      setSelectedDataset('silver_banking');
+      fetchTables('silver_banking');
+    } finally {
+      setLoadingDatasets(false);
+    }
+  };
+
+  // Fetch Tables for a Dataset
+  const fetchTables = async (datasetId: string) => {
+    setLoadingTables(true);
+    try {
+      const response = await axios.get(`/api/v1/rc18/bigquery/datasets/${datasetId}/tables`, {
+        headers: user?.token ? { Authorization: `Bearer ${user.token}` } : {}
+      });
+      if (response.data?.tables) {
+        setTables(response.data.tables);
+        if (response.data.tables.length > 0) {
+          setSelectedTable(response.data.tables[0].id);
+        }
+      }
+    } catch (err: any) {
+      console.warn(`Fallback loading tables for ${datasetId}:`, err);
+      const fallbackTbls = [
+        { id: 'silver_clientes_v2', type: 'TABLE' },
+        { id: 'silver_contratos_portabilidade_v2', type: 'TABLE' },
+        { id: 'silver_bancos_v2', type: 'TABLE' }
+      ];
+      setTables(fallbackTbls);
+      setSelectedTable('silver_clientes_v2');
+    } finally {
+      setLoadingTables(false);
+    }
+  };
+
+  // Fetch Quality Dimensions (Acurácia, Completude, Consistência)
+  const fetchDimensions = async (dataset: string = selectedDataset, table: string = selectedTable) => {
     setLoading(true);
     setError(null);
     try {
       const response = await axios.get('/api/v1/rc18/data-quality-dimensions', {
+        params: { dataset, table },
         headers: user?.token ? { Authorization: `Bearer ${user.token}` } : {}
       });
       setData(response.data);
@@ -85,12 +173,31 @@ const RC18Dashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchDimensions();
+    fetchDatasets();
   }, [user?.token]);
+
+  useEffect(() => {
+    fetchDimensions(selectedDataset, selectedTable);
+  }, [selectedDataset, selectedTable]);
+
+  const handleDatasetChange = (event: any) => {
+    const ds = event.target.value;
+    setSelectedDataset(ds);
+    fetchTables(ds);
+  };
+
+  const handleTableChange = (event: any) => {
+    const tbl = event.target.value;
+    setSelectedTable(tbl);
+  };
+
+  const handleAnalyze = () => {
+    fetchDimensions(selectedDataset, selectedTable);
+  };
 
   const accuracy = data?.dimensions?.accuracy;
   const completeness = data?.dimensions?.completeness;
-  const reliability = data?.dimensions?.reliability;
+  const consistency = data?.dimensions?.consistency;
 
   return (
     <Box sx={{ width: '92%', maxWidth: '1400px', margin: '24px auto', paddingBottom: '40px' }}>
@@ -110,16 +217,16 @@ const RC18Dashboard: React.FC = () => {
       >
         <Box>
           <Typography variant="h4" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif', fontSize: '28px' }}>
-            Resolução BCB nº 18/2025 - Painel de Qualidade de Dados
+            Painel - Qualidade de Dados (Resolução BCB nº 18/2025)
           </Typography>
           <Typography variant="subtitle1" sx={{ opacity: 0.9, marginTop: '6px', fontSize: '15px' }}>
-            Conformidade Regulatória do Banco Central do Brasil • Fonte: Dataplex Data Quality & Cloud Audit Logs (GCP)
+            Avaliação de Acurácia, Completude e Consistência em Tabelas do BigQuery
           </Typography>
         </Box>
         <Button
           variant="contained"
           startIcon={<RefreshIcon />}
-          onClick={fetchDimensions}
+          onClick={() => fetchDimensions(selectedDataset, selectedTable)}
           disabled={loading}
           sx={{
             backgroundColor: '#FFF',
@@ -134,6 +241,81 @@ const RC18Dashboard: React.FC = () => {
         </Button>
       </Box>
 
+      {/* Selector Panel: BigQuery Dataset & Table */}
+      <Paper
+        sx={{
+          padding: '20px 24px',
+          borderRadius: '16px',
+          border: '1px solid #E0E0E0',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.03)',
+          marginBottom: '28px',
+          backgroundColor: '#F8F9FA'
+        }}
+      >
+        <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '16px', color: '#1F1F1F', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <StorageIcon sx={{ color: '#1A73E8' }} /> Selecione a Tabela do BigQuery para Análise de Qualidade
+        </Typography>
+
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
+          <FormControl fullWidth size="small">
+            <InputLabel id="dataset-select-label">Dataset BigQuery</InputLabel>
+            <Select
+              labelId="dataset-select-label"
+              id="dataset-select"
+              value={selectedDataset}
+              label="Dataset BigQuery"
+              onChange={handleDatasetChange}
+              disabled={loadingDatasets}
+              sx={{ backgroundColor: '#FFF', borderRadius: '8px' }}
+            >
+              {datasets.map((ds) => (
+                <MenuItem key={ds.id} value={ds.id}>
+                  {ds.id} {ds.location ? `(${ds.location})` : ''}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl fullWidth size="small">
+            <InputLabel id="table-select-label">Tabela do BigQuery</InputLabel>
+            <Select
+              labelId="table-select-label"
+              id="table-select"
+              value={selectedTable}
+              label="Tabela do BigQuery"
+              onChange={handleTableChange}
+              disabled={loadingTables || tables.length === 0}
+              sx={{ backgroundColor: '#FFF', borderRadius: '8px' }}
+            >
+              {tables.map((tbl) => (
+                <MenuItem key={tbl.id} value={tbl.id}>
+                  {tbl.id}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <Button
+            variant="contained"
+            startIcon={loading ? <CircularProgress size={18} color="inherit" /> : <PlayArrowIcon />}
+            onClick={handleAnalyze}
+            disabled={loading}
+            sx={{
+              minWidth: '220px',
+              height: '40px',
+              backgroundColor: '#1A73E8',
+              fontWeight: 600,
+              textTransform: 'none',
+              borderRadius: '8px',
+              boxShadow: 'none',
+              '&:hover': { backgroundColor: '#1557B0' }
+            }}
+          >
+            Analisar Qualidade
+          </Button>
+        </Stack>
+      </Paper>
+
       {error && (
         <Alert severity="error" sx={{ marginBottom: '24px', borderRadius: '8px' }}>
           {error}
@@ -146,6 +328,25 @@ const RC18Dashboard: React.FC = () => {
         </Box>
       ) : (
         <>
+          {/* Active Selection Badge */}
+          <Box sx={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <Typography variant="body2" sx={{ color: '#5F6368', fontWeight: 500 }}>
+              Exibindo resultados para:
+            </Typography>
+            <Chip
+              icon={<StorageIcon style={{ fontSize: 16 }} />}
+              label={`Dataset: ${selectedDataset}`}
+              size="small"
+              sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8', fontWeight: 600 }}
+            />
+            <Chip
+              icon={<TableChartIcon style={{ fontSize: 16 }} />}
+              label={`Tabela: ${selectedTable}`}
+              size="small"
+              sx={{ backgroundColor: '#FCE8E6', color: '#C5221F', fontWeight: 600 }}
+            />
+          </Box>
+
           {/* Executive Overview Cards for Dimensions 1, 2 & 3 */}
           <Grid container spacing={3} sx={{ marginBottom: '32px' }}>
             {/* Dimensão 1: Acurácia */}
@@ -198,17 +399,13 @@ const RC18Dashboard: React.FC = () => {
                     {accuracy?.description}
                   </Typography>
 
-                  <Box sx={{ display: 'flex', gap: 2, borderTop: '1px solid #F1F3F4', paddingTop: '16px' }}>
-                    <Box>
-                      <Typography variant="caption" sx={{ color: '#70757A' }}>Regras Avaliadas</Typography>
-                      <Typography variant="body1" sx={{ fontWeight: 600 }}>{accuracy?.rulesEvaluated || 0}</Typography>
-                    </Box>
-                    <Box sx={{ marginLeft: 'auto' }}>
-                      <Typography variant="caption" sx={{ color: '#70757A' }}>Regras Aprovadas</Typography>
-                      <Typography variant="body1" sx={{ fontWeight: 600, color: '#137333' }}>
-                        {accuracy?.rulesPassed || 0} / {accuracy?.rulesEvaluated || 0}
-                      </Typography>
-                    </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
+                    <Typography variant="caption" sx={{ color: '#5F6368' }}>
+                      Regras em conformidade:
+                    </Typography>
+                    <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
+                      {accuracy?.rulesPassed ?? 0} / {accuracy?.rulesEvaluated ?? 0}
+                    </Typography>
                   </Box>
                 </CardContent>
               </Card>
@@ -231,7 +428,7 @@ const RC18Dashboard: React.FC = () => {
                       <Chip
                         label="Dimensão 2 • Conteúdo & Exatidão"
                         size="small"
-                        sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8', fontWeight: 600, marginBottom: '8px' }}
+                        sx={{ backgroundColor: '#E6F4EA', color: '#137333', fontWeight: 600, marginBottom: '8px' }}
                       />
                       <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
                         Completude (Completeness)
@@ -264,23 +461,19 @@ const RC18Dashboard: React.FC = () => {
                     {completeness?.description}
                   </Typography>
 
-                  <Box sx={{ display: 'flex', gap: 2, borderTop: '1px solid #F1F3F4', paddingTop: '16px' }}>
-                    <Box>
-                      <Typography variant="caption" sx={{ color: '#70757A' }}>Regras Avaliadas</Typography>
-                      <Typography variant="body1" sx={{ fontWeight: 600 }}>{completeness?.rulesEvaluated || 0}</Typography>
-                    </Box>
-                    <Box sx={{ marginLeft: 'auto' }}>
-                      <Typography variant="caption" sx={{ color: '#70757A' }}>Regras Aprovadas</Typography>
-                      <Typography variant="body1" sx={{ fontWeight: 600, color: '#137333' }}>
-                        {completeness?.rulesPassed || 0} / {completeness?.rulesEvaluated || 0}
-                      </Typography>
-                    </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
+                    <Typography variant="caption" sx={{ color: '#5F6368' }}>
+                      Regras em conformidade:
+                    </Typography>
+                    <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
+                      {completeness?.rulesPassed ?? 0} / {completeness?.rulesEvaluated ?? 0}
+                    </Typography>
                   </Box>
                 </CardContent>
               </Card>
             </Grid>
 
-            {/* Dimensão 3: Confiabilidade (Cloud Audit Logs) */}
+            {/* Dimensão 3: Consistência */}
             <Grid size={{ xs: 12, md: 4 }}>
               <Card
                 sx={{
@@ -297,10 +490,10 @@ const RC18Dashboard: React.FC = () => {
                       <Chip
                         label="Dimensão 3 • Conteúdo & Exatidão"
                         size="small"
-                        sx={{ backgroundColor: '#FCE8E6', color: '#C5221F', fontWeight: 600, marginBottom: '8px' }}
+                        sx={{ backgroundColor: '#F3E8FF', color: '#7E22CE', fontWeight: 600, marginBottom: '8px' }}
                       />
                       <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
-                        Confiabilidade (Reliability)
+                        Consistência (Consistency)
                       </Typography>
                     </Box>
                     <Box
@@ -308,13 +501,13 @@ const RC18Dashboard: React.FC = () => {
                         width: '56px',
                         height: '56px',
                         borderRadius: '50%',
-                        backgroundColor: (reliability?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
+                        backgroundColor: (consistency?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center'
                       }}
                     >
-                      {(reliability?.scorePct ?? 0) >= 95 ? (
+                      {(consistency?.scorePct ?? 0) >= 95 ? (
                         <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
                       ) : (
                         <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
@@ -323,50 +516,38 @@ const RC18Dashboard: React.FC = () => {
                   </Box>
 
                   <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
-                    {reliability?.scorePct ?? 100}%
+                    {consistency?.scorePct ?? 100}%
                   </Typography>
 
                   <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
-                    {reliability?.description}
+                    {consistency?.description}
                   </Typography>
 
-                  <Box sx={{ display: 'flex', gap: 2, borderTop: '1px solid #F1F3F4', paddingTop: '16px' }}>
-                    <Box>
-                      <Typography variant="caption" sx={{ color: '#70757A' }}>Fonte de Log</Typography>
-                      <Typography variant="body1" sx={{ fontWeight: 600, color: '#1A73E8' }}>
-                        Cloud Audit Logs
-                      </Typography>
-                    </Box>
-                    <Box sx={{ marginLeft: 'auto' }}>
-                      <Typography variant="caption" sx={{ color: '#70757A' }}>Regras Auditadas</Typography>
-                      <Typography variant="body1" sx={{ fontWeight: 600, color: '#137333' }}>
-                        {reliability?.rulesPassed || 0} / {reliability?.rulesEvaluated || 0}
-                      </Typography>
-                    </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
+                    <Typography variant="caption" sx={{ color: '#5F6368' }}>
+                      Regras em conformidade:
+                    </Typography>
+                    <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
+                      {consistency?.rulesPassed ?? 0} / {consistency?.rulesEvaluated ?? 0}
+                    </Typography>
                   </Box>
                 </CardContent>
               </Card>
             </Grid>
           </Grid>
 
-          {/* Details Tabs & Tables */}
-          <Paper sx={{ borderRadius: '16px', overflow: 'hidden', border: '1px solid #E0E0E0' }}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: '#FAFAFA' }}>
+          {/* Detailed Rules Table with Tabs */}
+          <Paper sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', overflow: 'hidden' }}>
+            <Box sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: '#FAFAFA', px: 2 }}>
               <Tabs
                 value={activeTab}
                 onChange={(_, newValue) => setActiveTab(newValue)}
-                sx={{
-                  '& .MuiTab-root': {
-                    fontFamily: '"Google Sans", sans-serif',
-                    fontWeight: 600,
-                    textTransform: 'none',
-                    fontSize: '15px'
-                  }
-                }}
+                textColor="primary"
+                indicatorColor="primary"
               >
-                <Tab label={`Dimensão 1: Acurácia (${accuracy?.rules?.length || 0} Regras)`} />
-                <Tab label={`Dimensão 2: Completude (${completeness?.rules?.length || 0} Regras)`} />
-                <Tab label={`Dimensão 3: Confiabilidade & Audit Logs (${reliability?.rules?.length || 0} Validações)`} />
+                <Tab label="Dimensão 1: Acurácia" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
+                <Tab label="Dimensão 2: Completude" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
+                <Tab label="Dimensão 3: Consistência" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
               </Tabs>
             </Box>
 
@@ -446,29 +627,27 @@ const RC18Dashboard: React.FC = () => {
                   <Table sx={{ minWidth: 650 }}>
                     <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
                       <TableRow>
-                        <TableCell sx={{ fontWeight: 700 }}>Validação de Auditoria (Confiabilidade)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Atributo Auditado</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Tabela Base</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Trilha de Log (GCP)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Integridade Auditada (%)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Status de Auditoria</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Regra de Consistência Lógica</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Atributos Comparados</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Conformidade (%)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {reliability?.rules?.map((rule, idx) => (
+                      {consistency?.rules?.map((rule, idx) => (
                         <TableRow key={idx} hover>
                           <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
                           <TableCell>{rule.column}</TableCell>
                           <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
-                          <TableCell>
-                            <Chip label="Cloud Audit Logs" size="small" sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8' }} />
-                          </TableCell>
+                          <TableCell>{rule.evaluatedCount.toLocaleString()}</TableCell>
                           <TableCell sx={{ fontWeight: 700, color: '#137333' }}>{rule.passPercentage}%</TableCell>
                           <TableCell>
                             {rule.passed ? (
-                              <Chip icon={<CheckCircleIcon />} label="Sem Desvio" color="success" size="small" />
+                              <Chip icon={<CheckCircleIcon />} label="Sem Contradição" color="success" size="small" />
                             ) : (
-                              <Chip icon={<WarningIcon />} label="Desvio Detectado" color="error" size="small" />
+                              <Chip icon={<WarningIcon />} label="Inconsistência" color="error" size="small" />
                             )}
                           </TableCell>
                         </TableRow>
