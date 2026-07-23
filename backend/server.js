@@ -189,14 +189,18 @@ app.post('/api/v1/check-permissions', async (req, res) => {
     const accessToken = req.headers.authorization?.split(' ')[1];
     const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || 'vanessahay-477-20250108170134';
 
-    // Development, mock or unauthenticated bypass to prevent locking out demo users
-    if (!accessToken || accessToken === 'null' || accessToken === 'undefined' || accessToken.startsWith('mock-')) {
+    // Mock token bypass for local dev test mode only
+    if (accessToken?.startsWith('mock-')) {
         return res.json({
             hasPermission: true,
             grantedPermissions: permissions || [],
             missingPermissions: [],
-            message: 'Development / Mock access granted.'
+            message: 'Local mock test mode.'
         });
+    }
+
+    if (!accessToken || accessToken === 'null' || accessToken === 'undefined') {
+        return res.status(401).json({ error: 'Authorization bearer token is required.' });
     }
 
     try {
@@ -206,7 +210,7 @@ app.post('/api/v1/check-permissions', async (req, res) => {
             auth: oauth2Client,
         });
 
-        console.log(`Testing ${permissions?.length} permissions for project: ${projectId}`);
+        console.log(`[IAM Check] Testing ${permissions?.length} permissions for project: ${projectId}`);
         const response = await cloudResourceManager.projects.testIamPermissions({
             resource: projectId,
             requestBody: { permissions: permissions || [] },
@@ -214,20 +218,29 @@ app.post('/api/v1/check-permissions', async (req, res) => {
 
         const grantedPermissions = response.data.permissions || [];
         const missingPermissions = (permissions || []).filter(p => !grantedPermissions.includes(p));
+        const hasPermission = missingPermissions.length === 0;
+
+        console.log(`[IAM Check] Granted ${grantedPermissions.length}/${permissions?.length} permissions for ${projectId}.`);
 
         return res.json({
-            hasPermission: true,
+            hasPermission,
             grantedPermissions,
             missingPermissions,
-            message: `Access granted on project ${projectId}.`
+            message: hasPermission
+                ? `User has all required permissions on project ${projectId}.`
+                : `User is missing ${missingPermissions.length} permission(s) on project ${projectId}.`
         });
     } catch (error) {
-        console.warn('[Permissions] Warning testing permissions:', error.message);
-        return res.json({
-            hasPermission: true,
-            grantedPermissions: permissions || [],
-            missingPermissions: [],
-            message: 'Permission check fallback granted.'
+        console.error('[IAM Check] Error testing permissions:', error.message);
+        if (error.code === 403) {
+            return res.status(403).json({
+                error: 'Permission Denied: Unable to test permissions for this project.',
+                details: error.message
+            });
+        }
+        return res.status(500).json({
+            error: 'Failed to verify IAM permissions',
+            details: error.message
         });
     }
 });
