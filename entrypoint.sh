@@ -17,5 +17,9 @@ if [ -d "$ASSETS_DIR" ]; then
 fi
 
 # Start the Node web server
+if [ -f "/app/dist/index.html" ]; then
+  sed -i "s|__VITE_API_URL__|${VITE_API_URL}|g" /app/dist/index.html
+fi
+
 echo "env setup done and run npm"
 npm start

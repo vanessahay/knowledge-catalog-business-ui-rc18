@@ -2383,8 +2383,11 @@ app.get('/', (req, res) => {
     res.redirect('/home'); // Redirects to the /home route
 });
 
-// For any other routes, serve the React index.html
-app.get('/*\w', (req, res) => {
+// For any other routes, serve the React index.html with no-cache headers
+app.get('*', (req, res) => {
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
