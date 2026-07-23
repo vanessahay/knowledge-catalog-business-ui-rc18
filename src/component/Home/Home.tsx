@@ -54,6 +54,7 @@ const Home = () => {
   useEffect(() => {
     if (!user?.token || !user?.email || accessCheckedRef.current) return;
     accessCheckedRef.current = true;
+    if (user.token.startsWith('mock-')) return;
 
     // 1. Check if login flagged missing OAuth scopes
     const scopeCheckFailed = localStorage.getItem('scopeCheckFailed');
