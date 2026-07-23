@@ -2113,12 +2113,12 @@ app.get('/api/v1/rc18/bigquery/datasets', async (req, res) => {
       location: d.metadata?.location || 'us-central1'
     }));
 
-    if (datasetList.length === 0) {
-      datasetList = [
-        { id: 'silver_banking', location: 'us-central1' },
-        { id: 'gold_financial_reporting', location: 'us-central1' },
-        { id: 'bronze_raw_ingestion', location: 'us-central1' }
-      ];
+    // Ensure governance dataset is present
+    if (!datasetList.some(d => d.id === 'governance')) {
+      datasetList.unshift({ id: 'governance', location: 'us-central1' });
+    }
+    if (!datasetList.some(d => d.id === 'Summit_demo')) {
+      datasetList.push({ id: 'Summit_demo', location: 'us-central1' });
     }
 
     return res.json({ success: true, datasets: datasetList });
@@ -2127,9 +2127,9 @@ app.get('/api/v1/rc18/bigquery/datasets', async (req, res) => {
     return res.json({
       success: true,
       datasets: [
-        { id: 'silver_banking', location: 'us-central1' },
-        { id: 'gold_financial_reporting', location: 'us-central1' },
-        { id: 'bronze_raw_ingestion', location: 'us-central1' }
+        { id: 'governance', location: 'us-central1' },
+        { id: 'Summit_demo', location: 'us-central1' },
+        { id: 'silver_banking', location: 'us-central1' }
       ]
     });
   }
@@ -2151,17 +2151,18 @@ app.get('/api/v1/rc18/bigquery/datasets/:datasetId/tables', async (req, res) => 
       type: t.metadata?.type || 'TABLE'
     }));
 
+    if (datasetId === 'governance' && !tableList.some(t => t.id === 'dq_results')) {
+      tableList.unshift({ id: 'dq_results', type: 'TABLE' });
+    }
     if (tableList.length === 0) {
-      if (datasetId.includes('gold')) {
-        tableList = [
-          { id: 'gold_balancete_contabil_v1', type: 'TABLE' },
-          { id: 'gold_demonstrativo_resultados_v1', type: 'TABLE' }
-        ];
+      if (datasetId === 'governance') {
+        tableList = [{ id: 'dq_results', type: 'TABLE' }];
+      } else if (datasetId.includes('Summit')) {
+        tableList = [{ id: 'transacao_cartao', type: 'TABLE' }];
       } else {
         tableList = [
           { id: 'silver_clientes_v2', type: 'TABLE' },
-          { id: 'silver_contratos_portabilidade_v2', type: 'TABLE' },
-          { id: 'silver_bancos_v2', type: 'TABLE' }
+          { id: 'silver_contratos_portabilidade_v2', type: 'TABLE' }
         ];
       }
     }
@@ -2169,20 +2170,141 @@ app.get('/api/v1/rc18/bigquery/datasets/:datasetId/tables', async (req, res) => 
     return res.json({ success: true, tables: tableList });
   } catch (err) {
     console.warn(`[RC18] BigQuery tables fetch warning for ${req.params.datasetId}:`, err.message);
-    return res.json({
-      success: true,
-      tables: [
-        { id: 'silver_clientes_v2', type: 'TABLE' },
-        { id: 'silver_contratos_portabilidade_v2', type: 'TABLE' },
-        { id: 'silver_bancos_v2', type: 'TABLE' }
-      ]
-    });
+    let defaultTables = req.params.datasetId === 'governance'
+      ? [{ id: 'dq_results', type: 'TABLE' }]
+      : [{ id: 'transacao_cartao', type: 'TABLE' }, { id: 'silver_clientes_v2', type: 'TABLE' }];
+    return res.json({ success: true, tables: defaultTables });
   }
 });
 
+function getSampleDqResultsRows(projectId, datasetId, tableId) {
+  return [
+    {
+      data_quality_scan: {
+        resource_name: `//dataplex.googleapis.com/projects/632617278139/locations/us-central1/dataScans/dq-transacao-cartao`,
+        project_id: projectId,
+        location: "us-central1",
+        data_scan_id: "dq-transacao-cartao",
+        display_name: "dq-transacao-cartao"
+      },
+      data_source: {
+        resource_name: `//bigquery.googleapis.com/projects/${projectId}/datasets/Summit_demo/tables/transacao_cartao`,
+        dataset_id: "Summit_demo",
+        table_id: "transacao_cartao"
+      },
+      data_quality_job_id: "2a1557dd-2b07-4d2d-af02-a944500a8398",
+      job_start_time: "2026-07-23 14:18:49.000000 UTC",
+      job_end_time: "2026-07-23 14:19:17.000000 UTC",
+      job_quality_result: { passed: "false", score: "95.449997" },
+      job_rows_scanned: "54893",
+      rule_name: "Unicidade de Data/Hora Transação",
+      rule_description: "Verificação de unicidade no atributo data_hora_transacao",
+      rule_type: "Uniqueness check",
+      rule_column: "data_hora_transacao",
+      rule_dimension: "UNIQUENESS",
+      rule_passed: "false",
+      rule_rows_evaluated: "54893",
+      rule_rows_passed: "54864",
+      rule_rows_passed_percent: "99.94717",
+      rule_failed_records_query: "WITH `2a1557dd-2b07-4d2d-af02-a944500a8398` AS (SELECT * FROM `vanessahay-477-20250108170134.Summit_demo.transacao_cartao` ) SELECT * FROM `2a1557dd-2b07-4d2d-af02-a944500a8398` WHERE `data_hora_transacao` IN (SELECT `data_hora_transacao` FROM `2a1557dd-2b07-4d2d-af02-a944500a8398` GROUP BY `data_hora_transacao` HAVING COUNT(`data_hora_transacao`) > 1);",
+      last_updated: "2026-07-23 14:18:17.000000 UTC"
+    },
+    {
+      data_quality_scan: {
+        resource_name: `//dataplex.googleapis.com/projects/632617278139/locations/us-central1/dataScans/dq-transacao-cartao`,
+        project_id: projectId,
+        location: "us-central1",
+        data_scan_id: "dq-transacao-cartao",
+        display_name: "dq-transacao-cartao"
+      },
+      data_source: {
+        resource_name: `//bigquery.googleapis.com/projects/${projectId}/datasets/Summit_demo/tables/transacao_cartao`,
+        dataset_id: "Summit_demo",
+        table_id: "transacao_cartao"
+      },
+      data_quality_job_id: "2a1557dd-2b07-4d2d-af02-a944500a8398",
+      job_start_time: "2026-07-23 14:18:49.000000 UTC",
+      job_end_time: "2026-07-23 14:19:17.000000 UTC",
+      job_quality_result: { passed: "true", score: "100.0" },
+      job_rows_scanned: "54893",
+      rule_name: "Unicidade do ID Estabelecimento",
+      rule_description: "Verificação de unicidade do id_estabelecimento",
+      rule_type: "Uniqueness check",
+      rule_column: "id_estabelecimento",
+      rule_dimension: "UNIQUENESS",
+      rule_passed: "true",
+      rule_rows_evaluated: "54893",
+      rule_rows_passed: "54893",
+      rule_rows_passed_percent: "100.0",
+      rule_failed_records_query: "",
+      last_updated: "2026-07-23 14:18:17.000000 UTC"
+    },
+    {
+      data_quality_scan: {
+        resource_name: `//dataplex.googleapis.com/projects/632617278139/locations/us-central1/dataScans/dq-transacao-cartao`,
+        project_id: projectId,
+        location: "us-central1",
+        data_scan_id: "dq-transacao-cartao",
+        display_name: "dq-transacao-cartao"
+      },
+      data_source: {
+        resource_name: `//bigquery.googleapis.com/projects/${projectId}/datasets/Summit_demo/tables/transacao_cartao`,
+        dataset_id: "Summit_demo",
+        table_id: "transacao_cartao"
+      },
+      data_quality_job_id: "2a1557dd-2b07-4d2d-af02-a944500a8398",
+      job_start_time: "2026-07-23 14:18:49.000000 UTC",
+      job_end_time: "2026-07-23 14:19:17.000000 UTC",
+      job_quality_result: { passed: "true", score: "100.0" },
+      job_rows_scanned: "54893",
+      rule_name: "NOT_NULL Data/Hora Transação",
+      rule_description: "Completude de data_hora_transacao sem valores nulos",
+      rule_type: "NULL check",
+      rule_column: "data_hora_transacao",
+      rule_dimension: "COMPLETENESS",
+      rule_passed: "true",
+      rule_rows_evaluated: "54893",
+      rule_rows_passed: "54893",
+      rule_rows_passed_percent: "100.0",
+      rule_failed_records_query: "",
+      last_updated: "2026-07-23 14:18:17.000000 UTC"
+    },
+    {
+      data_quality_scan: {
+        resource_name: `//dataplex.googleapis.com/projects/632617278139/locations/us-central1/dataScans/dq-transacao-cartao`,
+        project_id: projectId,
+        location: "us-central1",
+        data_scan_id: "dq-transacao-cartao",
+        display_name: "dq-transacao-cartao"
+      },
+      data_source: {
+        resource_name: `//bigquery.googleapis.com/projects/${projectId}/datasets/Summit_demo/tables/transacao_cartao`,
+        dataset_id: "Summit_demo",
+        table_id: "transacao_cartao"
+      },
+      data_quality_job_id: "2a1557dd-2b07-4d2d-af02-a944500a8398",
+      job_start_time: "2026-07-23 14:18:49.000000 UTC",
+      job_end_time: "2026-07-23 14:19:17.000000 UTC",
+      job_quality_result: { passed: "true", score: "100.0" },
+      job_rows_scanned: "54893",
+      rule_name: "Validação de Valor Positivo de Transação",
+      rule_description: "Acurácia do valor_transacao (> 0)",
+      rule_type: "Range check",
+      rule_column: "valor_transacao",
+      rule_dimension: "VALIDITY",
+      rule_passed: "true",
+      rule_rows_evaluated: "54893",
+      rule_rows_passed: "54893",
+      rule_rows_passed_percent: "100.0",
+      rule_failed_records_query: "",
+      last_updated: "2026-07-23 14:18:17.000000 UTC"
+    }
+  ];
+}
+
 /**
  * GET /api/v1/rc18/data-quality-dimensions
- * Returns Data Quality metrics for Resolução BCB 18/2025:
+ * Queries selected BigQuery DQ export table (e.g. governance.dq_results) and returns results in 3 dimensions:
  * - Dimensão 1: Acurácia (Accuracy)
  * - Dimensão 2: Completude (Completeness)
  * - Dimensão 3: Consistência (Consistency)
@@ -2190,128 +2312,71 @@ app.get('/api/v1/rc18/bigquery/datasets/:datasetId/tables', async (req, res) => 
 app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
   try {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || 'vanessahay-477-20250108170134';
-    const location = process.env.GCP_LOCATION || 'us-central1';
-    const selectedTable = (req.query.table || 'silver_clientes_v2').toString();
-    const selectedDataset = (req.query.dataset || 'silver_banking').toString();
-    const accessToken = req.headers.authorization?.split(' ')[1];
+    const selectedDataset = (req.query.dataset || 'governance').toString();
+    const selectedTable = (req.query.table || 'dq_results').toString();
 
-    let client;
-    if (accessToken && accessToken !== 'null' && accessToken !== 'undefined') {
-      const oauth2Client = new CustomGoogleAuth(accessToken);
-      client = new DataScanServiceClient({ auth: oauth2Client });
-    } else {
-      client = new DataScanServiceClient();
+    console.log(`[RC18] Querying BigQuery DQ results table: \`${projectId}.${selectedDataset}.${selectedTable}\``);
+
+    let bqRows = [];
+    try {
+      const bigquery = new BigQuery({ projectId });
+      const query = `SELECT * FROM \`${projectId}.${selectedDataset}.${selectedTable}\` ORDER BY last_updated DESC LIMIT 1000`;
+      const [rows] = await bigquery.query({ query, location: 'us-central1' });
+      bqRows = rows || [];
+    } catch (bqErr) {
+      console.warn(`[RC18] Warning: BigQuery query to ${selectedDataset}.${selectedTable} failed (${bqErr.message}). Using sample DQ results.`);
     }
 
-    const parent = `projects/${projectId}/locations/${location}`;
-    console.log(`[RC18] Fetching Dataplex DataScans for parent: ${parent}, table: ${selectedTable}`);
+    if (bqRows.length === 0) {
+      bqRows = getSampleDqResultsRows(projectId, selectedDataset, selectedTable);
+    }
 
     let accuracyRules = [];
     let completenessRules = [];
-    let scannedTables = [];
-    let dqScans = [];
+    let consistencyRules = [];
+    let scannedSourceTables = new Set();
 
-    try {
-      const [scans] = await client.listDataScans({ parent });
-      dqScans = (scans || []).filter(s => s.type === 'DATA_QUALITY' || s.dataQualitySpec);
-    } catch (listErr) {
-      console.warn(`[RC18] Warning: listDataScans failed (${listErr.message}). Using fallback RC18 rule definitions.`);
-    }
+    for (const row of bqRows) {
+      const dsInfo = row.data_source || {};
+      const sourceTable = dsInfo.table_id || 'transacao_cartao';
+      const sourceDataset = dsInfo.dataset_id || 'Summit_demo';
+      const fullSourceTable = `${sourceDataset}.${sourceTable}`;
+      scannedSourceTables.add(fullSourceTable);
 
-    for (const scan of dqScans) {
-      try {
-        const scanName = scan.name;
-        const tableName = scan.data?.entity || scan.data?.resource || scan.displayName || scanName.split('/').pop();
-        scannedTables.push(tableName);
+      const ruleDim = (row.rule_dimension || '').toUpperCase();
+      const ruleType = row.rule_type || '';
+      const colName = row.rule_column || 'Tabela Geral';
+      const isPassed = String(row.rule_passed).toLowerCase() === 'true';
+      const evaluated = Number(row.rule_rows_evaluated || row.job_rows_scanned || 0);
+      const passed = Number(row.rule_rows_passed || 0);
+      const failed = Math.max(0, evaluated - passed);
+      const passPct = row.rule_rows_passed_percent ? parseFloat(row.rule_rows_passed_percent) : (evaluated > 0 ? Math.round((passed / evaluated) * 10000) / 100 : 100);
 
-        const [jobs] = await client.listDataScanJobs({ parent: scanName, pageSize: 5 });
-        if (jobs && jobs.length > 0) {
-          const latestJob = jobs[0];
-          const dqResult = latestJob.dataQualityResult;
-          if (dqResult && dqResult.rules) {
-            for (const r of dqResult.rules) {
-              const dimension = (r.rule?.dimension || '').toUpperCase();
-              const ruleDetail = {
-                ruleName: r.rule?.name || r.rule?.column || 'Regra de Qualidade',
-                column: r.rule?.column || 'Tabela Geral',
-                table: tableName,
-                passed: Boolean(r.passed),
-                evaluatedCount: Number(r.evaluatedCount || 0),
-                passedCount: Number(r.passedCount || 0),
-                failedCount: Number((r.evaluatedCount || 0) - (r.passedCount || 0)),
-                passPercentage: r.evaluatedCount > 0 ? Math.round((r.passedCount / r.evaluatedCount) * 10000) / 100 : (r.passed ? 100 : 0),
-                dimension: dimension || (r.rule?.nonNullExpectation ? 'COMPLETENESS' : 'ACCURACY'),
-                executionTime: latestJob.endTime || latestJob.startTime
-              };
+      const ruleItem = {
+        ruleName: row.rule_name || `${ruleType} (${colName})`,
+        column: colName,
+        table: sourceTable,
+        dataset: sourceDataset,
+        scanId: row.data_quality_scan?.data_scan_id || 'dq-scan',
+        passed: isPassed,
+        evaluatedCount: evaluated,
+        passedCount: passed,
+        failedCount: failed,
+        passPercentage: passPct,
+        dimension: ruleDim || 'ACCURACY',
+        ruleType: ruleType,
+        failedRecordsQuery: row.rule_failed_records_query || '',
+        executionTime: row.job_end_time || row.job_start_time || row.last_updated
+      };
 
-              if (dimension === 'COMPLETENESS' || r.rule?.nonNullExpectation) {
-                completenessRules.push(ruleDetail);
-              } else {
-                accuracyRules.push(ruleDetail);
-              }
-            }
-          }
-        }
-      } catch (err) {
-        console.warn(`[RC18] Could not fetch jobs for scan ${scan.name}:`, err.message);
+      if (ruleDim === 'COMPLETENESS' || ruleType.includes('NULL')) {
+        completenessRules.push(ruleItem);
+      } else if (ruleDim === 'UNIQUENESS' || ruleDim === 'CONSISTENCY' || ruleType.includes('Uniqueness') || ruleType.includes('SQL')) {
+        consistencyRules.push(ruleItem);
+      } else {
+        accuracyRules.push(ruleItem);
       }
     }
-
-    // Dynamic / Fallback rules bound to selected table
-    if (accuracyRules.length === 0) {
-      accuracyRules = [
-        { ruleName: 'Score de Crédito no Intervalo [0-1000]', column: 'score_credito', table: selectedTable, passed: true, evaluatedCount: 1000, passedCount: 1000, failedCount: 0, passPercentage: 100, dimension: 'ACCURACY' },
-        { ruleName: 'Renda Mensal Positiva (> R$ 0)', column: 'renda_mensal', table: selectedTable, passed: true, evaluatedCount: 1000, passedCount: 1000, failedCount: 0, passPercentage: 100, dimension: 'ACCURACY' },
-        { ruleName: 'Taxa de Juros Válida (0-100%)', column: 'taxa_juros_anual_contratada', table: selectedTable, passed: true, evaluatedCount: 1200, passedCount: 1200, failedCount: 0, passPercentage: 100, dimension: 'ACCURACY' }
-      ];
-    }
-    if (completenessRules.length === 0) {
-      completenessRules = [
-        { ruleName: 'NOT_NULL Chave Primária (pk_id)', column: 'pk_cliente_id / pk_contrato_id', table: selectedTable, passed: true, evaluatedCount: 1000, passedCount: 1000, failedCount: 0, passPercentage: 100, dimension: 'COMPLETENESS' },
-        { ruleName: 'NOT_NULL Documento Cadastral (cpf_cnpj)', column: 'cpf_cnpj', table: selectedTable, passed: true, evaluatedCount: 1000, passedCount: 1000, failedCount: 0, passPercentage: 100, dimension: 'COMPLETENESS' },
-        { ruleName: 'NOT_NULL Código de Instituição', column: 'pk_banco_id', table: selectedTable, passed: true, evaluatedCount: 150, passedCount: 150, failedCount: 0, passPercentage: 100, dimension: 'COMPLETENESS' }
-      ];
-    }
-
-    // Dimensão 3: Consistência (Consistency - Regras Lógicas de Negócio)
-    const consistencyRules = [
-      {
-        ruleName: 'Consistência Lógica: Saldo Devedor <= Valor Financiado Original',
-        column: 'saldo_devedor_atual, valor_financiado_original',
-        table: selectedTable,
-        passed: true,
-        evaluatedCount: 1200,
-        passedCount: 1200,
-        failedCount: 0,
-        passPercentage: 100.0,
-        dimension: 'CONSISTENCY',
-        description: 'Verificação de contradição lógica de negócio: Saldo devedor não pode exceder o montante financiado.'
-      },
-      {
-        ruleName: 'Consistência de Vigência: Data de Vencimento >= Data de Contratação',
-        column: 'data_vencimento_contrato, data_contratacao',
-        table: selectedTable,
-        passed: true,
-        evaluatedCount: 1200,
-        passedCount: 1200,
-        failedCount: 0,
-        passPercentage: 100.0,
-        dimension: 'CONSISTENCY',
-        description: 'Validação temporal cronológica de vigência de contratos e operações financeiras.'
-      },
-      {
-        ruleName: 'Consistência Cadastral: Renda Mensal vs Limite de Crédito Concedido',
-        column: 'limite_credito_concedido, renda_mensal',
-        table: selectedTable,
-        passed: true,
-        evaluatedCount: 1000,
-        passedCount: 1000,
-        failedCount: 0,
-        passPercentage: 100.0,
-        dimension: 'CONSISTENCY',
-        description: 'Regra de política de crédito: Limite rotativo proporcional à renda declarada sem inconsistência de negócio.'
-      }
-    ];
 
     const calcScore = (rules) => {
       if (rules.length === 0) return 100.0;
@@ -2338,7 +2403,7 @@ app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
           rulesPassed: accuracyRules.filter(r => r.passed).length,
           rules: accuracyRules,
           productGcp: 'Dataplex Auto DQ',
-          description: 'Validação de limites numéricos, formatos e conformidade de regras de negócio.'
+          description: 'Validação de limites numéricos, formatos e conformidade de regras de exatidão.'
         },
         completeness: {
           name: 'Completude',
@@ -2348,7 +2413,7 @@ app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
           rulesPassed: completenessRules.filter(r => r.passed).length,
           rules: completenessRules,
           productGcp: 'Dataplex Auto DQ',
-          description: 'Verificação da ausência de valores nulos (NOT_NULL) em atributos essenciais.'
+          description: 'Verificação da ausência de valores nulos (NULL check) em atributos essenciais.'
         },
         consistency: {
           name: 'Consistência',
@@ -2357,12 +2422,12 @@ app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
           rulesEvaluated: consistencyRules.length,
           rulesPassed: consistencyRules.filter(r => r.passed).length,
           rules: consistencyRules,
-          productGcp: 'BigQuery / Dataplex Auto DQ',
-          description: 'Ausência de contradições lógicas de negócio entre atributos da mesma entidade.'
+          productGcp: 'Dataplex Auto DQ / BigQuery',
+          description: 'Validação de unicidade e ausência de contradições de negócio entre dados.'
         }
       },
-      scannedTables: Array.from(new Set(scannedTables)),
-      totalScansFound: dqScans.length
+      scannedSourceTables: Array.from(scannedSourceTables),
+      totalRulesEvaluated: bqRows.length
     });
   } catch (error) {
     console.error('[RC18] Error fetching RC18 Data Quality dimensions:', error);

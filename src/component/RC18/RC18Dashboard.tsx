@@ -92,8 +92,8 @@ const RC18Dashboard: React.FC = () => {
   // BigQuery Selection State
   const [datasets, setDatasets] = useState<DatasetOption[]>([]);
   const [tables, setTables] = useState<TableOption[]>([]);
-  const [selectedDataset, setSelectedDataset] = useState<string>('silver_banking');
-  const [selectedTable, setSelectedTable] = useState<string>('silver_clientes_v2');
+  const [selectedDataset, setSelectedDataset] = useState<string>('governance');
+  const [selectedTable, setSelectedTable] = useState<string>('dq_results');
   const [loadingDatasets, setLoadingDatasets] = useState<boolean>(false);
   const [loadingTables, setLoadingTables] = useState<boolean>(false);
 
