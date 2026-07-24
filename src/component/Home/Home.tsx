@@ -67,24 +67,17 @@ const Home = () => {
       return;
     }
 
-    // 2. Check IAM permissions via backend endpoint
+    // 2. Check IAM permissions via backend endpoint for diagnostics
     axios.post(URLS.API_URL + URLS.CHECK_PERMISSIONS, {
       permissions: [...REQUIRED_PERMISSIONS],
     }).then((res) => {
       if (!res.data.hasPermission) {
-        triggerNoAccess({
-          message: `Your account (${user.email}) does not have the required Dataplex permissions on this project. Please contact your administrator to get the appropriate permissions.`,
-        });
+        console.warn(`[Home] Account (${user.email}) missing some IAM permissions:`, res.data.missingPermissions);
       }
     }).catch((err) => {
-      console.error('[Home] Permission check failed:', err);
-      if (err.response?.status === 403) {
-        triggerNoAccess({
-          message: 'Unable to verify your permissions. You may not have sufficient access to this project. Please contact your administrator.',
-        });
-      }
+      console.warn('[Home] Permission check warning:', err?.message || err);
     });
-  }, [user?.token, user?.email, triggerNoAccess]);
+  }, [user?.token, user?.email]);
 
   useEffect(() => {
     setLoader(true);
