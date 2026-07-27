@@ -15,6 +15,21 @@ const { BigQuery } = require('@google-cloud/bigquery');
 const rateLimit = require('express-rate-limit');
 const { default: axios } = require('axios');
 
+// Helper to dynamically resolve target GCP Project ID across local dev, Docker, Cloud Run, and GKE environments
+const getGcpProjectId = () => {
+  return process.env.GOOGLE_CLOUD_PROJECT_ID ||
+         process.env.GOOGLE_CLOUD_PROJECT ||
+         process.env.GCP_PROJECT ||
+         process.env.PROJECT_ID ||
+         'vanessahay-477-20250108170134';
+};
+
+// Helper to dynamically resolve target GCP Location/Region
+const getGcpLocation = () => {
+  return process.env.GCP_LOCATION ||
+         process.env.GCP_REGION ||
+         'global';
+};
 
 class CustomGoogleAuth extends GoogleAuth {
   constructor(token) {
@@ -2166,17 +2181,19 @@ app.get('/api/v1/rc18/bigquery/datasets/:datasetId/tables', async (req, res) => 
 });
 
 function getSampleDqResultsRows(projectId, datasetId, tableId) {
+  const pId = projectId || getGcpProjectId();
+  const pNum = process.env.GOOGLE_CLOUD_PROJECT_NUMBER || pId;
   return [
     {
       data_quality_scan: {
-        resource_name: `//dataplex.googleapis.com/projects/632617278139/locations/us-central1/dataScans/dq-transacao-cartao`,
-        project_id: projectId,
+        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-transacao-cartao`,
+        project_id: pId,
         location: "us-central1",
         data_scan_id: "dq-transacao-cartao",
         display_name: "dq-transacao-cartao"
       },
       data_source: {
-        resource_name: `//bigquery.googleapis.com/projects/${projectId}/datasets/Summit_demo/tables/transacao_cartao`,
+        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/Summit_demo/tables/transacao_cartao`,
         dataset_id: "Summit_demo",
         table_id: "transacao_cartao"
       },
@@ -2194,19 +2211,19 @@ function getSampleDqResultsRows(projectId, datasetId, tableId) {
       rule_rows_evaluated: "54893",
       rule_rows_passed: "54864",
       rule_rows_passed_percent: "99.94717",
-      rule_failed_records_query: "WITH `2a1557dd-2b07-4d2d-af02-a944500a8398` AS (SELECT * FROM `vanessahay-477-20250108170134.Summit_demo.transacao_cartao` ) SELECT * FROM `2a1557dd-2b07-4d2d-af02-a944500a8398` WHERE `data_hora_transacao` IN (SELECT `data_hora_transacao` FROM `2a1557dd-2b07-4d2d-af02-a944500a8398` GROUP BY `data_hora_transacao` HAVING COUNT(`data_hora_transacao`) > 1);",
+      rule_failed_records_query: `WITH \`2a1557dd-2b07-4d2d-af02-a944500a8398\` AS (SELECT * FROM \`${pId}.Summit_demo.transacao_cartao\` ) SELECT * FROM \`2a1557dd-2b07-4d2d-af02-a944500a8398\` WHERE \`data_hora_transacao\` IN (SELECT \`data_hora_transacao\` FROM \`2a1557dd-2b07-4d2d-af02-a944500a8398\` GROUP BY \`data_hora_transacao\` HAVING COUNT(\`data_hora_transacao\`) > 1);`,
       last_updated: "2026-07-23 14:18:17.000000 UTC"
     },
     {
       data_quality_scan: {
-        resource_name: `//dataplex.googleapis.com/projects/632617278139/locations/us-central1/dataScans/dq-transacao-cartao`,
-        project_id: projectId,
+        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-transacao-cartao`,
+        project_id: pId,
         location: "us-central1",
         data_scan_id: "dq-transacao-cartao",
         display_name: "dq-transacao-cartao"
       },
       data_source: {
-        resource_name: `//bigquery.googleapis.com/projects/${projectId}/datasets/Summit_demo/tables/transacao_cartao`,
+        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/Summit_demo/tables/transacao_cartao`,
         dataset_id: "Summit_demo",
         table_id: "transacao_cartao"
       },
@@ -2229,14 +2246,14 @@ function getSampleDqResultsRows(projectId, datasetId, tableId) {
     },
     {
       data_quality_scan: {
-        resource_name: `//dataplex.googleapis.com/projects/632617278139/locations/us-central1/dataScans/dq-transacao-cartao`,
-        project_id: projectId,
+        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-transacao-cartao`,
+        project_id: pId,
         location: "us-central1",
         data_scan_id: "dq-transacao-cartao",
         display_name: "dq-transacao-cartao"
       },
       data_source: {
-        resource_name: `//bigquery.googleapis.com/projects/${projectId}/datasets/Summit_demo/tables/transacao_cartao`,
+        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/Summit_demo/tables/transacao_cartao`,
         dataset_id: "Summit_demo",
         table_id: "transacao_cartao"
       },
@@ -2259,14 +2276,14 @@ function getSampleDqResultsRows(projectId, datasetId, tableId) {
     },
     {
       data_quality_scan: {
-        resource_name: `//dataplex.googleapis.com/projects/632617278139/locations/us-central1/dataScans/dq-transacao-cartao`,
-        project_id: projectId,
+        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-transacao-cartao`,
+        project_id: pId,
         location: "us-central1",
         data_scan_id: "dq-transacao-cartao",
         display_name: "dq-transacao-cartao"
       },
       data_source: {
-        resource_name: `//bigquery.googleapis.com/projects/${projectId}/datasets/Summit_demo/tables/transacao_cartao`,
+        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/Summit_demo/tables/transacao_cartao`,
         dataset_id: "Summit_demo",
         table_id: "transacao_cartao"
       },

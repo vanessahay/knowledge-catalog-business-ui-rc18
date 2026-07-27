@@ -42,6 +42,54 @@ When a user selects a dataset, the application will fetch and display details su
 
 **Material UI**: For modern, responsive, utility-first styling.
 
+---
+
+## 🚀 Como Instalar e Utilizar na Sua Própria Organização / Projeto GCP
+
+Este aplicativo foi projetado com arquitetura **multi-tenant e dinâmica**, permitindo que **qualquer empresa, organização ou usuário do Google Cloud** instale, configure e utilize a interface visual com seus próprios dados e políticas de governança no **Google Cloud / Dataplex / BigQuery**.
+
+### ✨ 1. Deploy Automatizado em 1 Clique (Script de Instalação)
+Para facilitar a instalação em um novo projeto GCP ou organização, disponibilizamos um script interativo que automatiza a ativação das APIs, criação do Artifact Registry, compilação via Cloud Build e publicação segura no Cloud Run.
+
+Abra o seu **Google Cloud Shell** (ou terminal com Google Cloud SDK instalado) e execute:
+
+```bash
+# 1. Clone o repositório no seu ambiente
+git clone https://github.com/GoogleCloudPlatform/dataplex-business-user-interface.git
+cd dataplex-business-user-interface
+
+# 2. Dê permissão de execução e rode o instalador interativo
+chmod +x deploy-gcp.sh
+./deploy-gcp.sh
+```
+
+**O que o instalador fará por você:**
+- Solicitará o ID do seu Projeto GCP, Região do Cloud Run e o seu Google OAuth Client ID.
+- Ativará automaticamente as APIs obrigatórias (`run`, `cloudbuild`, `artifactregistry`, `bigquery`, `dataplex`, `datacatalog`).
+- Compilará o container e implantará o Cloud Run configurando todas as variáveis de ambiente necessárias (`GOOGLE_CLOUD_PROJECT_ID`, `VITE_GOOGLE_CLIENT_ID`, etc.).
+- Ao final, exibirá a URL oficial da sua aplicação pronta para uso!
+
+---
+
+### 🔑 2. Configuração de Credenciais OAuth (Login Institucional/G Suite)
+Para que qualquer usuário da sua empresa faça login no painel via Google Sign-In:
+1. No Console GCP, acesse **APIs & Serviços > Credenciais**.
+2. Crie ou Edite um **ID do cliente OAuth 2.0** do tipo *Aplicação Web*.
+3. Em **Origens JavaScript autorizadas**, adicione a URL gerada pelo Cloud Run (ex: `https://seu-servico-xyz.a.run.app`).
+4. Em **URIs de redirecionamento autorizados**, adicione a mesma URL terminada em `/auth/google/callback` (ex: `https://seu-servico-xyz.a.run.app/auth/google/callback`).
+
+---
+
+### 🛡️ 3. Governança, Permissões IAM e Multilocação
+A aplicação não possui travas duras e adapta-se dinamicamente às permissões dos usuários do seu projeto:
+- **Painel de Qualidade de Dados (BCB Resolução nº 18/2025)**: O backend lê automaticamente as tabelas exportadas pelo Dataplex Auto DQ (padrão: dataset `governance`, tabela `dq_results`, customizável via variáveis `DATAPLEX_DQ_DATASET` e `DATAPLEX_DQ_TABLE`). Se você selecionar uma tabela de negócios na UI, o sistema exibirá os escores de Acurácia, Completude e Consistência em tempo real.
+- **Permissões Recomendadas na Sua Organização**: Para que os colaboradores visualizem ativos e catálogos no GCP da sua empresa, garanta que tenham no IAM as roles:
+  - `roles/dataplex.viewer` (ou `roles/dataplex.admin` para administradores)
+  - `roles/bigquery.dataViewer` e `roles/bigquery.jobUser` (para consulta ao BigQuery e métricas de qualidade)
+  - `roles/datacatalog.viewer` (para busca de metadados no catálogo universal)
+
+---
+
 ## Getting Started: Running Locally
 Follow these steps to set up and run the project on your local machine.
 
