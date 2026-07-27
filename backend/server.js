@@ -2186,6 +2186,36 @@ function getSampleDqResultsRows(projectId, datasetId, tableId) {
   return [
     {
       data_quality_scan: {
+        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-demo`,
+        project_id: pId,
+        location: "us-central1",
+        data_scan_id: "dq-demo",
+        display_name: "dq-demo"
+      },
+      data_source: {
+        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/Summit_demo/tables/cadastro_cliente`,
+        dataset_id: "Summit_demo",
+        table_id: "cadastro_cliente"
+      },
+      data_quality_job_id: "44ad6ce3-c5bd-48fa-916d-d21308aeaf91",
+      job_start_time: "2026-07-27 08:03:04.000000 UTC",
+      job_end_time: "2026-07-27 08:03:36.000000 UTC",
+      job_quality_result: { passed: "true", score: "100.0" },
+      job_rows_scanned: "9907",
+      rule_name: "Unicidade do Endereço (cadastro_cliente)",
+      rule_description: "Verificação de unicidade na coluna endereco",
+      rule_type: "Uniqueness check",
+      rule_column: "endereco",
+      rule_dimension: "UNIQUENESS",
+      rule_passed: "true",
+      rule_rows_evaluated: "9907",
+      rule_rows_passed: "9907",
+      rule_rows_passed_percent: "100.0",
+      rule_failed_records_query: `WITH \`44ad6ce3-c5bd-48fa-916d-d21308aeaf91\` AS (SELECT * FROM \`${pId}.Summit_demo.cadastro_cliente\` ) SELECT * FROM \`44ad6ce3-c5bd-48fa-916d-d21308aeaf91\` WHERE \`endereco\` IN (SELECT \`endereco\` FROM \`44ad6ce3-c5bd-48fa-916d-d21308aeaf91\` GROUP BY \`endereco\` HAVING COUNT(\`endereco\`) > 1);`,
+      last_updated: "2026-07-27 08:03:36.000000 UTC"
+    },
+    {
+      data_quality_scan: {
         resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-transacao-cartao`,
         project_id: pId,
         location: "us-central1",
@@ -2316,46 +2346,29 @@ function getSampleDqResultsRows(projectId, datasetId, tableId) {
  */
 app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
   try {
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || 'vanessahay-477-20250108170134';
-    const selectedDataset = (req.query.dataset || 'Summit_demo').toString();
-    const selectedTable = (req.query.table || 'transacao_cartao').toString();
+    const projectId = getGcpProjectId();
+    // The user indicates the BigQuery table containing the Data Quality scan results (default: governance.dq_results)
+    const dqResultsDataset = (req.query.dataset || 'governance').toString();
+    const dqResultsTable = (req.query.table || 'dq_results').toString();
 
-    // Central Data Quality scan export table in BigQuery (Dataplex DQ Export Destination)
-    const dqExportDataset = 'governance';
-    const dqExportTable = 'dq_results';
-
-    console.log(`[RC18] Querying Dataplex DQ Export table \`${projectId}.${dqExportDataset}.${dqExportTable}\` for audited table \`${selectedDataset}.${selectedTable}\``);
+    console.log(`[RC18] Querying Data Quality results table \`${projectId}.${dqResultsDataset}.${dqResultsTable}\``);
 
     let bqRows = [];
     try {
       const bigquery = new BigQuery({ projectId });
-      // Always query the central governance.dq_results table where all scan outputs are exported
-      const query = `SELECT * FROM \`${projectId}.${dqExportDataset}.${dqExportTable}\` ORDER BY last_updated DESC LIMIT 1000`;
+      const query = `SELECT * FROM \`${projectId}.${dqResultsDataset}.${dqResultsTable}\` ORDER BY last_updated DESC LIMIT 1000`;
       const [rows] = await bigquery.query({ query, location: 'us-central1' });
       bqRows = rows || [];
     } catch (bqErr) {
-      console.warn(`[RC18] Warning: BigQuery query to ${dqExportDataset}.${dqExportTable} failed (${bqErr.message}). Using sample DQ export results.`);
+      console.warn(`[RC18] Warning: BigQuery query to ${dqResultsDataset}.${dqResultsTable} failed (${bqErr.message}). Using sample DQ export results.`);
     }
 
     if (bqRows.length === 0) {
-      bqRows = getSampleDqResultsRows(projectId, selectedDataset, selectedTable);
+      bqRows = getSampleDqResultsRows(projectId, dqResultsDataset, dqResultsTable);
     }
 
-    // Filter scan result rows for the selected target dataset and table if specified
-    let filteredRows = bqRows;
-    if (selectedDataset !== 'governance' && selectedDataset !== 'all' && selectedTable !== 'dq_results' && selectedTable !== 'all') {
-      const matching = bqRows.filter(row => {
-        const ds = row.data_source || {};
-        const resName = typeof ds.resource_name === 'string' ? ds.resource_name : '';
-        const dsName = (ds.dataset_id || (resName.match(/datasets\/([^\/]+)/)?.[1]) || '').toLowerCase();
-        const tblName = (ds.table_id || (resName.match(/tables\/([^\/]+)/)?.[1]) || '').toLowerCase();
-        return (dsName === '' || dsName === selectedDataset.toLowerCase()) &&
-               (tblName === '' || tblName === selectedTable.toLowerCase());
-      });
-      if (matching.length > 0) {
-        filteredRows = matching;
-      }
-    }
+    // Since the user indicated the DQ results table itself, all rows in this table represent the evaluated scans across audited tables
+    const filteredRows = bqRows;
 
     let accuracyRules = [];
     let completenessRules = [];
@@ -2364,22 +2377,25 @@ app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
 
     for (const row of filteredRows) {
       const dsInfo = row.data_source || {};
-      const sourceTable = dsInfo.table_id || selectedTable;
-      const sourceDataset = dsInfo.dataset_id || selectedDataset;
-      const fullSourceTable = `${sourceDataset}.${sourceTable}`;
-      scannedSourceTables.add(fullSourceTable);
+      const resName = typeof dsInfo.resource_name === 'string' ? dsInfo.resource_name : '';
+      const sourceDataset = dsInfo.dataset_id || (resName.match(/datasets\/([^\/]+)/)?.[1]) || 'N/A';
+      const sourceTable = dsInfo.table_id || (resName.match(/tables\/([^\/]+)/)?.[1]) || 'N/A';
+      if (sourceDataset !== 'N/A' && sourceTable !== 'N/A') {
+        scannedSourceTables.add(`${sourceDataset}.${sourceTable}`);
+      }
 
       const ruleDim = (row.rule_dimension || '').toUpperCase();
       const ruleType = row.rule_type || '';
       const colName = row.rule_column || 'Tabela Geral';
-      const isPassed = String(row.rule_passed).toLowerCase() === 'true';
+      const isPassed = String(row.rule_passed !== undefined && row.rule_passed !== null && row.rule_passed !== '' ? row.rule_passed : (row.job_quality_result?.passed)).toLowerCase() === 'true';
       const evaluated = Number(row.rule_rows_evaluated || row.job_rows_scanned || 0);
-      const passed = Number(row.rule_rows_passed || 0);
+      const passed = Number(row.rule_rows_passed !== undefined && row.rule_rows_passed !== null && row.rule_rows_passed !== '' ? row.rule_rows_passed : (isPassed ? evaluated : 0));
       const failed = Math.max(0, evaluated - passed);
-      const passPct = row.rule_rows_passed_percent ? parseFloat(row.rule_rows_passed_percent) : (evaluated > 0 ? Math.round((passed / evaluated) * 10000) / 100 : 100);
+      const passPct = row.rule_rows_passed_percent !== undefined && row.rule_rows_passed_percent !== null && row.rule_rows_passed_percent !== '' ? parseFloat(row.rule_rows_passed_percent) : (row.job_quality_result?.score ? parseFloat(row.job_quality_result.score) : (evaluated > 0 ? Math.round((passed / evaluated) * 10000) / 100 : 100));
+      const ruleName = (row.rule_name && row.rule_name.trim() !== '') ? row.rule_name.trim() : `${ruleType || 'DQ Check'} (${colName})`;
 
       const ruleItem = {
-        ruleName: row.rule_name || `${ruleType} (${colName})`,
+        ruleName: ruleName,
         column: colName,
         table: sourceTable,
         dataset: sourceDataset,
