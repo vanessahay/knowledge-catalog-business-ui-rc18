@@ -57,16 +57,6 @@ const LoginV2: React.FC = () => {
     scope: 'https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/bigquery https://www.googleapis.com/auth/dataplex.readonly https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.send',
   });
 
-  const handleDevLogin = async () => {
-    setLoading(true);
-    try {
-      await login({ credential: 'mock-dev-token-local' });
-      navigate('/rc18-dashboard', { replace: true });
-    } catch {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="loginv2-page">
       <div className="loginv2-card">
@@ -114,15 +104,6 @@ const LoginV2: React.FC = () => {
                     className="loginv2-google-icon"
                   />
                   <span className="loginv2-button-text">Continue with Google</span>
-                </button>
-
-                <button
-                  className="loginv2-button loginv2-dev-button"
-                  onClick={handleDevLogin}
-                >
-                  <span className="loginv2-button-text">
-                    Entrar em Modo de Teste Local (RC18)
-                  </span>
                 </button>
               </>
             )}
