@@ -2434,8 +2434,8 @@ app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
     res.json({
       success: true,
       timestamp: new Date().toISOString(),
-      dataset: selectedDataset,
-      table: selectedTable,
+      dataset: dqResultsDataset,
+      table: dqResultsTable,
       dimensions: {
         accuracy: {
           name: 'Acurácia',
