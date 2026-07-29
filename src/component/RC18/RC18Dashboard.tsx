@@ -18,10 +18,7 @@ import {
   Tabs,
   Tab,
   Alert,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
+  TextField,
   Stack
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -73,17 +70,6 @@ interface RC18Response {
   totalScansFound?: number;
   totalRulesEvaluated?: number;
 }
-
-interface DatasetOption {
-  id: string;
-  location?: string;
-}
-
-interface TableOption {
-  id: string;
-  type?: string;
-}
-
 const RC18Dashboard: React.FC = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState<boolean>(true);
@@ -92,69 +78,8 @@ const RC18Dashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<number>(0);
 
   // BigQuery Selection State
-  const [datasets, setDatasets] = useState<DatasetOption[]>([]);
-  const [tables, setTables] = useState<TableOption[]>([]);
   const [selectedDataset, setSelectedDataset] = useState<string>('governance');
   const [selectedTable, setSelectedTable] = useState<string>('dq_results');
-  const [loadingDatasets, setLoadingDatasets] = useState<boolean>(false);
-  const [loadingTables, setLoadingTables] = useState<boolean>(false);
-
-  // Fetch BigQuery Datasets
-  const fetchDatasets = async () => {
-    setLoadingDatasets(true);
-    try {
-      const response = await axios.get('/api/v1/rc18/bigquery/datasets', {
-        headers: user?.token ? { Authorization: `Bearer ${user.token}` } : {}
-      });
-      if (response.data?.datasets) {
-        setDatasets(response.data.datasets);
-        // Prefer governance if present, otherwise first dataset
-        const hasGovernance = response.data.datasets.some((d: any) => d.id === 'governance');
-        const targetDs = hasGovernance ? 'governance' : (response.data.datasets[0]?.id || 'governance');
-        setSelectedDataset(targetDs);
-        fetchTables(targetDs);
-      }
-    } catch (err: any) {
-      console.warn('Fallback loading BigQuery datasets:', err);
-      const fallbackDs = [
-        { id: 'governance', location: 'us-central1' },
-        { id: 'Summit_demo', location: 'us-central1' },
-        { id: 'silver_banking', location: 'us-central1' }
-      ];
-      setDatasets(fallbackDs);
-      setSelectedDataset('governance');
-      fetchTables('governance');
-    } finally {
-      setLoadingDatasets(false);
-    }
-  };
-
-  // Fetch Tables for a Dataset
-  const fetchTables = async (datasetId: string) => {
-    setLoadingTables(true);
-    try {
-      const response = await axios.get(`/api/v1/rc18/bigquery/datasets/${datasetId}/tables`, {
-        headers: user?.token ? { Authorization: `Bearer ${user.token}` } : {}
-      });
-      if (response.data?.tables) {
-        setTables(response.data.tables);
-        const hasDqResults = response.data.tables.some((t: any) => t.id === 'dq_results');
-        const targetTbl = hasDqResults ? 'dq_results' : (response.data.tables[0]?.id || 'dq_results');
-        setSelectedTable(targetTbl);
-      }
-    } catch (err: any) {
-      console.warn(`Fallback loading tables for ${datasetId}:`, err);
-      const fallbackTbls = [
-        { id: 'dq_results', type: 'TABLE' },
-        { id: 'transacao_cartao', type: 'TABLE' },
-        { id: 'clientes', type: 'TABLE' }
-      ];
-      setTables(fallbackTbls);
-      setSelectedTable('dq_results');
-    } finally {
-      setLoadingTables(false);
-    }
-  };
 
   // Fetch Quality Dimensions (Acurácia, Completude, Consistência)
   const fetchDimensions = async (dataset: string = selectedDataset, table: string = selectedTable) => {
@@ -175,23 +100,8 @@ const RC18Dashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchDatasets();
-  }, [user?.token]);
-
-  useEffect(() => {
     fetchDimensions(selectedDataset, selectedTable);
-  }, [selectedDataset, selectedTable]);
-
-  const handleDatasetChange = (event: any) => {
-    const ds = event.target.value;
-    setSelectedDataset(ds);
-    fetchTables(ds);
-  };
-
-  const handleTableChange = (event: any) => {
-    const tbl = event.target.value;
-    setSelectedTable(tbl);
-  };
+  }, []);
 
   const handleAnalyze = () => {
     fetchDimensions(selectedDataset, selectedTable);
@@ -262,43 +172,25 @@ const RC18Dashboard: React.FC = () => {
         </Typography>
 
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
-          <FormControl fullWidth size="small">
-            <InputLabel id="dataset-select-label">Dataset dos Resultados</InputLabel>
-            <Select
-              labelId="dataset-select-label"
-              id="dataset-select"
-              value={selectedDataset}
-              label="Dataset dos Resultados"
-              onChange={handleDatasetChange}
-              disabled={loadingDatasets}
-              sx={{ backgroundColor: '#FFF', borderRadius: '8px' }}
-            >
-              {datasets.map((ds) => (
-                <MenuItem key={ds.id} value={ds.id}>
-                  {ds.id} {ds.location ? `(${ds.location})` : ''}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <TextField
+            fullWidth
+            size="small"
+            label="Dataset dos Resultados (DQ Export)"
+            value={selectedDataset}
+            onChange={(e) => setSelectedDataset(e.target.value)}
+            placeholder="governance"
+            sx={{ backgroundColor: '#FFF', borderRadius: '8px' }}
+          />
 
-          <FormControl fullWidth size="small">
-            <InputLabel id="table-select-label">Tabela dos Resultados (DQ Export)</InputLabel>
-            <Select
-              labelId="table-select-label"
-              id="table-select"
-              value={selectedTable}
-              label="Tabela dos Resultados (DQ Export)"
-              onChange={handleTableChange}
-              disabled={loadingTables || tables.length === 0}
-              sx={{ backgroundColor: '#FFF', borderRadius: '8px' }}
-            >
-              {tables.map((tbl) => (
-                <MenuItem key={tbl.id} value={tbl.id}>
-                  {tbl.id}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          <TextField
+            fullWidth
+            size="small"
+            label="Tabela dos Resultados (DQ Export)"
+            value={selectedTable}
+            onChange={(e) => setSelectedTable(e.target.value)}
+            placeholder="dq_results"
+            sx={{ backgroundColor: '#FFF', borderRadius: '8px' }}
+          />
 
           <Button
             variant="contained"
