@@ -21,7 +21,7 @@ FROM node:20-alpine AS backend
 
 WORKDIR /app
 
-# Copy backend files
+# Copy backend files (build v31)
 COPY backend/package.json ./
 RUN npm install
 
