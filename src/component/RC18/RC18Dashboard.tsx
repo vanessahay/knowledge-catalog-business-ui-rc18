@@ -34,6 +34,7 @@ interface RuleDetail {
   ruleName: string;
   column: string;
   table: string;
+  dataset?: string;
   passed: boolean;
   evaluatedCount: number;
   passedCount: number;
@@ -55,6 +56,21 @@ interface DimensionData {
   productGcp?: string;
 }
 
+interface TableSummary {
+  dataset: string;
+  table: string;
+  fullTableName: string;
+  totalRules: number;
+  passedRules: number;
+  failedRules: number;
+  accuracyScore: number;
+  completenessScore: number;
+  consistencyScore: number;
+  overallScore: number;
+  lastExecutionTime?: string;
+  status: 'Conforme' | 'Atenção' | 'Crítico';
+}
+
 interface RC18Response {
   success: boolean;
   timestamp: string;
@@ -67,6 +83,7 @@ interface RC18Response {
   };
   scannedTables?: string[];
   scannedSourceTables?: string[];
+  tableSummaries?: TableSummary[];
   totalScansFound?: number;
   totalRulesEvaluated?: number;
 }
@@ -110,6 +127,95 @@ const RC18Dashboard: React.FC = () => {
   const accuracy = data?.dimensions?.accuracy;
   const completeness = data?.dimensions?.completeness;
   const consistency = data?.dimensions?.consistency;
+
+  const getDerivedTableSummaries = (): TableSummary[] => {
+    if (data?.tableSummaries && data.tableSummaries.length > 0) {
+      return data.tableSummaries;
+    }
+    const map: Record<string, {
+      dataset: string;
+      table: string;
+      fullTableName: string;
+      accuracyRules: RuleDetail[];
+      completenessRules: RuleDetail[];
+      consistencyRules: RuleDetail[];
+      totalRules: number;
+      passedRules: number;
+      failedRules: number;
+      lastExecutionTime?: string;
+    }> = {};
+
+    const all = [
+      ...(accuracy?.rules || []),
+      ...(completeness?.rules || []),
+      ...(consistency?.rules || [])
+    ];
+
+    for (const r of all) {
+      const ds = r.dataset || 'Summit_demo';
+      const key = `${ds}.${r.table}`;
+      if (!map[key]) {
+        map[key] = {
+          dataset: ds,
+          table: r.table,
+          fullTableName: key,
+          accuracyRules: [],
+          completenessRules: [],
+          consistencyRules: [],
+          totalRules: 0,
+          passedRules: 0,
+          failedRules: 0,
+          lastExecutionTime: r.executionTime
+        };
+      }
+      map[key].totalRules += 1;
+      if (r.passed) map[key].passedRules += 1;
+      else map[key].failedRules += 1;
+
+      if (r.dimension === 'COMPLETENESS' || r.ruleName.includes('NULL')) {
+        map[key].completenessRules.push(r);
+      } else if (r.dimension === 'UNIQUENESS' || r.dimension === 'CONSISTENCY' || r.ruleName.includes('Unicidade')) {
+        map[key].consistencyRules.push(r);
+      } else {
+        map[key].accuracyRules.push(r);
+      }
+    }
+
+    return Object.values(map).map(ts => {
+      const calcPct = (rules: RuleDetail[]) => {
+        if (rules.length === 0) return 100.0;
+        const total = rules.reduce((acc, curr) => acc + (curr.evaluatedCount || 1), 0);
+        const passed = rules.reduce((acc, curr) => acc + (curr.passedCount || (curr.passed ? 1 : 0)), 0);
+        return Math.round((passed / Math.max(total, 1)) * 10000) / 100;
+      };
+
+      const accScore = calcPct(ts.accuracyRules);
+      const compScore = calcPct(ts.completenessRules);
+      const consScore = calcPct(ts.consistencyRules);
+      const overallScore = calcPct([...ts.accuracyRules, ...ts.completenessRules, ...ts.consistencyRules]);
+
+      let status: 'Conforme' | 'Atenção' | 'Crítico' = 'Conforme';
+      if (ts.failedRules > 0 && overallScore >= 90) status = 'Atenção';
+      else if (overallScore < 90) status = 'Crítico';
+
+      return {
+        dataset: ts.dataset,
+        table: ts.table,
+        fullTableName: ts.fullTableName,
+        totalRules: ts.totalRules,
+        passedRules: ts.passedRules,
+        failedRules: ts.failedRules,
+        accuracyScore: accScore,
+        completenessScore: compScore,
+        consistencyScore: consScore,
+        overallScore: overallScore,
+        lastExecutionTime: ts.lastExecutionTime,
+        status
+      };
+    });
+  };
+
+  const tableSummariesList = getDerivedTableSummaries();
 
   return (
     <Box sx={{ width: '92%', maxWidth: '1400px', margin: '24px auto', paddingBottom: '40px' }}>
@@ -457,6 +563,7 @@ const RC18Dashboard: React.FC = () => {
                 textColor="primary"
                 indicatorColor="primary"
               >
+                <Tab label="📊 Visão Consolidada (Todas as Tabelas)" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
                 <Tab label="Dimensão 1: Acurácia" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
                 <Tab label="Dimensão 2: Completude" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
                 <Tab label="Dimensão 3: Consistência" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
@@ -465,6 +572,65 @@ const RC18Dashboard: React.FC = () => {
 
             <Box sx={{ padding: '24px' }}>
               {activeTab === 0 && (
+                <TableContainer>
+                  <Table sx={{ minWidth: 650 }}>
+                    <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
+                      <TableRow>
+                        <TableCell sx={{ fontWeight: 700 }}>Tabela Auditada (Dataset.Tabela)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Acurácia (%)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Completude (%)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Consistência (%)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Escore Geral (%)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Regras (Aprovadas/Total)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Status Geral</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {tableSummariesList.map((ts, idx) => (
+                        <TableRow key={idx} hover>
+                          <TableCell sx={{ fontWeight: 700, color: '#1A73E8' }}>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <TableChartIcon fontSize="small" sx={{ color: '#1A73E8' }} />
+                              {ts.fullTableName}
+                            </Box>
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 600, color: ts.accuracyScore >= 95 ? '#137333' : '#B06000' }}>
+                            {ts.accuracyScore}%
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 600, color: ts.completenessScore >= 95 ? '#137333' : '#B06000' }}>
+                            {ts.completenessScore}%
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 600, color: ts.consistencyScore >= 95 ? '#137333' : '#B06000' }}>
+                            {ts.consistencyScore}%
+                          </TableCell>
+                          <TableCell sx={{ fontWeight: 800, fontSize: '15px' }}>
+                            {ts.overallScore}%
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={`${ts.passedRules} / ${ts.totalRules}`}
+                              size="small"
+                              variant="outlined"
+                              sx={{ fontWeight: 600 }}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            {ts.status === 'Conforme' ? (
+                              <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
+                            ) : ts.status === 'Atenção' ? (
+                              <Chip icon={<WarningIcon />} label="Requer Atenção" color="warning" size="small" />
+                            ) : (
+                              <Chip icon={<WarningIcon />} label="Crítico" color="error" size="small" />
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              )}
+
+              {activeTab === 1 && (
                 <TableContainer>
                   <Table sx={{ minWidth: 650 }}>
                     <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
@@ -499,7 +665,7 @@ const RC18Dashboard: React.FC = () => {
                 </TableContainer>
               )}
 
-              {activeTab === 1 && (
+              {activeTab === 2 && (
                 <TableContainer>
                   <Table sx={{ minWidth: 650 }}>
                     <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
@@ -534,7 +700,7 @@ const RC18Dashboard: React.FC = () => {
                 </TableContainer>
               )}
 
-              {activeTab === 2 && (
+              {activeTab === 3 && (
                 <TableContainer>
                   <Table sx={{ minWidth: 650 }}>
                     <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
