@@ -2431,6 +2431,71 @@ app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
     const completenessScore = calcScore(completenessRules);
     const consistencyScore = calcScore(consistencyRules);
 
+    // Calculate consolidated summary per audited table
+    const tableSummaryMap = {};
+    const allRulesCombined = [...accuracyRules, ...completenessRules, ...consistencyRules];
+
+    for (const r of allRulesCombined) {
+      const key = `${r.dataset}.${r.table}`;
+      if (!tableSummaryMap[key]) {
+        tableSummaryMap[key] = {
+          dataset: r.dataset,
+          table: r.table,
+          fullTableName: key,
+          totalRules: 0,
+          passedRules: 0,
+          failedRules: 0,
+          accuracyRules: [],
+          completenessRules: [],
+          consistencyRules: [],
+          lastExecutionTime: r.executionTime
+        };
+      }
+      tableSummaryMap[key].totalRules += 1;
+      if (r.passed) {
+        tableSummaryMap[key].passedRules += 1;
+      } else {
+        tableSummaryMap[key].failedRules += 1;
+      }
+
+      if (r.dimension === 'COMPLETENESS' || r.ruleType.includes('NULL')) {
+        tableSummaryMap[key].completenessRules.push(r);
+      } else if (r.dimension === 'UNIQUENESS' || r.dimension === 'CONSISTENCY' || r.ruleType.includes('Uniqueness') || r.ruleType.includes('SQL')) {
+        tableSummaryMap[key].consistencyRules.push(r);
+      } else {
+        tableSummaryMap[key].accuracyRules.push(r);
+      }
+    }
+
+    const tableSummaries = Object.values(tableSummaryMap).map(ts => {
+      const accScore = calcScore(ts.accuracyRules);
+      const compScore = calcScore(ts.completenessRules);
+      const consScore = calcScore(ts.consistencyRules);
+      const overallScore = calcScore([...ts.accuracyRules, ...ts.completenessRules, ...ts.consistencyRules]);
+      
+      let status = 'Conforme';
+      if (ts.failedRules > 0 && overallScore >= 90) {
+        status = 'Atenção';
+      } else if (overallScore < 90) {
+        status = 'Crítico';
+      }
+
+      return {
+        dataset: ts.dataset,
+        table: ts.table,
+        fullTableName: ts.fullTableName,
+        totalRules: ts.totalRules,
+        passedRules: ts.passedRules,
+        failedRules: ts.failedRules,
+        accuracyScore: accScore,
+        completenessScore: compScore,
+        consistencyScore: consScore,
+        overallScore: overallScore,
+        lastExecutionTime: ts.lastExecutionTime,
+        status: status
+      };
+    });
+
     res.json({
       success: true,
       timestamp: new Date().toISOString(),
@@ -2469,6 +2534,7 @@ app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
         }
       },
       scannedSourceTables: Array.from(scannedSourceTables),
+      tableSummaries: tableSummaries,
       totalRulesEvaluated: bqRows.length
     });
   } catch (error) {
