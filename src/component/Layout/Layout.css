@@ -25,7 +25,7 @@
 /* Page content wrapper */
 .page-content {
   flex: 1;
-  overflow-y: hidden;
+  overflow-y: auto;
   overflow-x: hidden;
 }
 
