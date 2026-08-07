@@ -19,6 +19,7 @@ import {
   Tab,
   Alert,
   TextField,
+  MenuItem,
   Stack
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
@@ -27,6 +28,11 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import StorageIcon from '@mui/icons-material/Storage';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import HubIcon from '@mui/icons-material/Hub';
+import AssessmentIcon from '@mui/icons-material/Assessment';
+import SecurityIcon from '@mui/icons-material/Security';
+import GppGoodIcon from '@mui/icons-material/GppGood';
+import KeyIcon from '@mui/icons-material/Key';
 import axios from 'axios';
 import { useAuth } from '../../auth/AuthProvider';
 
@@ -71,6 +77,76 @@ interface TableSummary {
   status: 'Conforme' | 'Atenção' | 'Crítico';
 }
 
+interface CatalogContextItem {
+  entryId: string;
+  displayName: string;
+  linkedResource: string;
+  entryGroup: string;
+  aspectTypes: string[];
+  governanceDomain: string;
+  dataQualityScore: number;
+  complianceStatus: 'Conforme' | 'Atenção' | 'Crítico';
+  lastLookupTime: string;
+}
+
+interface DlpFinding {
+  dataset: string;
+  table: string;
+  fullTableName: string;
+  column: string;
+  infoType: string;
+  infoTypeDisplayName: string;
+  category: string;
+  likelihood: string;
+  estimatedOccurrences: number;
+  sensitivity: 'Alta' | 'Média' | 'Baixa';
+  policyTagApplied: boolean;
+  policyTagName?: string;
+  recommendation: string;
+}
+
+interface DlpTableRiskProfile {
+  dataset: string;
+  table: string;
+  fullTableName: string;
+  totalSensitiveColumns: number;
+  highSensitivityColumns: number;
+  detectedInfoTypes: string[];
+  categories: string[];
+  maskingCoveragePct: number;
+  complianceStatus: string;
+  riskLevel: 'Alto' | 'Médio' | 'Baixo';
+}
+
+interface DlpSummary {
+  totalTablesScanned: number;
+  tablesWithSensitiveData: number;
+  totalPiiFieldsDetected: number;
+  bankingSecrecyFields: number;
+  highSensitivityFieldsCount: number;
+  protectedWithPolicyTagsCount: number;
+  overallProtectionCoveragePct: number;
+  highRiskTablesCount: number;
+  complianceLevel: string;
+}
+
+interface InfoTypeDistributionItem {
+  infoType: string;
+  displayName: string;
+  count: number;
+  category: string;
+}
+
+interface DlpResponse {
+  success: boolean;
+  timestamp: string;
+  location: string;
+  summary: DlpSummary;
+  infoTypeDistribution: InfoTypeDistributionItem[];
+  findings: DlpFinding[];
+  tableRiskProfiles: DlpTableRiskProfile[];
+}
+
 interface RC18Response {
   success: boolean;
   timestamp: string;
@@ -84,44 +160,60 @@ interface RC18Response {
   scannedTables?: string[];
   scannedSourceTables?: string[];
   tableSummaries?: TableSummary[];
+  centralizedCatalogContext?: CatalogContextItem[];
   totalScansFound?: number;
   totalRulesEvaluated?: number;
 }
+
+const AVAILABLE_REGIONS = [
+  { value: 'us-central1', label: 'us-central1 (EUA Central - Iowa)' },
+  { value: 'us-east1', label: 'us-east1 (EUA Leste - Carolina do Sul)' },
+  { value: 'us-east4', label: 'us-east4 (EUA Leste - Virgínia)' },
+  { value: 'us-west1', label: 'us-west1 (EUA Oeste - Oregon)' },
+  { value: 'southamerica-east1', label: 'southamerica-east1 (América do Sul - São Paulo)' },
+  { value: 'europe-west1', label: 'europe-west1 (Europa Ocidental - Bélgica)' },
+  { value: 'asia-east1', label: 'asia-east1 (Ásia Leste - Taiwan)' }
+];
+
 const RC18Dashboard: React.FC = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<RC18Response | null>(null);
+  const [dlpData, setDlpData] = useState<DlpResponse | null>(null);
   const [activeTab, setActiveTab] = useState<number>(0);
+  const [dlpTab, setDlpTab] = useState<number>(0);
+  const [viewMode, setViewMode] = useState<'by_table' | 'dlp_privacy' | 'centralized'>('by_table');
 
-  // BigQuery Selection State
-  const [selectedDataset, setSelectedDataset] = useState<string>('governance');
-  const [selectedTable, setSelectedTable] = useState<string>('dq_results');
+  // Dataplex & Cloud DLP Selection State
+  const [selectedLocation, setSelectedLocation] = useState<string>('us-central1');
 
-  // Fetch Quality Dimensions (Acurácia, Completude, Consistência)
-  const fetchDimensions = async (dataset: string = selectedDataset, table: string = selectedTable) => {
+  // Fetch Quality Dimensions & Cloud DLP Sensitive Data in parallel
+  const fetchFrameworkData = async (location: string = selectedLocation) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await axios.get('/api/v1/rc18/data-quality-dimensions', {
-        params: { dataset, table },
-        headers: user?.token ? { Authorization: `Bearer ${user.token}` } : {}
-      });
-      setData(response.data);
+      const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
+      const [dqRes, dlpRes] = await Promise.all([
+        axios.get('/api/v1/rc18/data-quality-dimensions', { params: { location }, headers }),
+        axios.get('/api/v1/rc18/dlp-sensitive-data', { params: { location }, headers })
+      ]);
+      setData(dqRes.data);
+      setDlpData(dlpRes.data);
     } catch (err: any) {
-      console.error('Failed to fetch RC18 dimensions:', err);
-      setError(err.response?.data?.message || err.message || 'Erro ao carregar dimensões da Resolução 18/2025.');
+      console.error('Failed to fetch RC18 & DLP data:', err);
+      setError(err.response?.data?.message || err.message || 'Erro ao carregar dados do Framework BACEN 18 / DLP.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDimensions(selectedDataset, selectedTable);
+    fetchFrameworkData(selectedLocation);
   }, []);
 
   const handleAnalyze = () => {
-    fetchDimensions(selectedDataset, selectedTable);
+    fetchFrameworkData(selectedLocation);
   };
 
   const accuracy = data?.dimensions?.accuracy;
@@ -152,7 +244,7 @@ const RC18Dashboard: React.FC = () => {
     ];
 
     for (const r of all) {
-      const ds = r.dataset || 'Summit_demo';
+      const ds = r.dataset || (r.table.includes('cartao') ? 'transacoes_cartao' : (r.table.includes('cliente') ? 'cadastro_cliente' : 'financeiro'));
       const key = `${ds}.${r.table}`;
       if (!map[key]) {
         map[key] = {
@@ -217,6 +309,25 @@ const RC18Dashboard: React.FC = () => {
 
   const tableSummariesList = getDerivedTableSummaries();
 
+  const getDerivedCentralizedContext = (): CatalogContextItem[] => {
+    if (data?.centralizedCatalogContext && data.centralizedCatalogContext.length > 0) {
+      return data.centralizedCatalogContext;
+    }
+    return tableSummariesList.map(ts => ({
+      entryId: `${ts.dataset}_${ts.table}`,
+      displayName: ts.fullTableName,
+      linkedResource: `//bigquery.googleapis.com/projects/your-project/datasets/${ts.dataset}/tables/${ts.table}`,
+      entryGroup: '@bigquery',
+      aspectTypes: ['schema', 'data_quality_aspect', 'governance_classification'],
+      governanceDomain: ts.dataset.toUpperCase(),
+      dataQualityScore: ts.overallScore,
+      complianceStatus: ts.status,
+      lastLookupTime: new Date().toISOString()
+    }));
+  };
+
+  const centralizedContextList = getDerivedCentralizedContext();
+
   return (
     <Box sx={{ width: '92%', maxWidth: '1400px', margin: '24px auto', paddingBottom: '40px' }}>
       {/* Header Banner */}
@@ -238,13 +349,13 @@ const RC18Dashboard: React.FC = () => {
             Painel - Qualidade de Dados (Resolução BCB nº 18/2025)
           </Typography>
           <Typography variant="subtitle1" sx={{ opacity: 0.9, marginTop: '6px', fontSize: '15px' }}>
-            Avaliação de Acurácia, Completude e Consistência em Tabelas do BigQuery
+            Consulta de Qualidade via Knowledge Catalog Lookup & Dataplex DataScans
           </Typography>
         </Box>
         <Button
           variant="contained"
           startIcon={<RefreshIcon />}
-          onClick={() => fetchDimensions(selectedDataset, selectedTable)}
+          onClick={() => fetchFrameworkData(selectedLocation)}
           disabled={loading}
           sx={{
             backgroundColor: '#FFF',
@@ -259,44 +370,40 @@ const RC18Dashboard: React.FC = () => {
         </Button>
       </Box>
 
-      {/* Selector Panel: BigQuery Dataset & Table */}
+      {/* Selector Panel: Região como filtro de escolha */}
       <Paper
         sx={{
           padding: '20px 24px',
           borderRadius: '16px',
           border: '1px solid #E0E0E0',
           boxShadow: '0 2px 12px rgba(0,0,0,0.03)',
-          marginBottom: '28px',
+          marginBottom: '24px',
           backgroundColor: '#F8F9FA'
         }}
       >
         <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '16px', color: '#1F1F1F', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <StorageIcon sx={{ color: '#1A73E8' }} /> Selecione a Tabela do BigQuery com os Resultados dos Scans (DQ Export)
+          <StorageIcon sx={{ color: '#1A73E8' }} /> Filtro de Região do Google Cloud / Dataplex
         </Typography>
         <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px', fontSize: '13px' }}>
-          Indique o Dataset e a Tabela onde os resultados dos scans de qualidade foram salvos (ex: <strong>governance.dq_results</strong>). A aplicação apresentará as dimensões avaliadas em todas as tabelas contidas nos resultados.
+          Selecione a região do GCP para carregar o contexto de catálogo centralizado e as métricas de qualidade de dados.
         </Typography>
 
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
           <TextField
+            select
             fullWidth
             size="small"
-            label="Dataset dos Resultados (DQ Export)"
-            value={selectedDataset}
-            onChange={(e) => setSelectedDataset(e.target.value)}
-            placeholder="governance"
+            label="Região do Google Cloud (Location)"
+            value={selectedLocation}
+            onChange={(e) => setSelectedLocation(e.target.value)}
             sx={{ backgroundColor: '#FFF', borderRadius: '8px' }}
-          />
-
-          <TextField
-            fullWidth
-            size="small"
-            label="Tabela dos Resultados (DQ Export)"
-            value={selectedTable}
-            onChange={(e) => setSelectedTable(e.target.value)}
-            placeholder="dq_results"
-            sx={{ backgroundColor: '#FFF', borderRadius: '8px' }}
-          />
+          >
+            {AVAILABLE_REGIONS.map((reg) => (
+              <MenuItem key={reg.value} value={reg.value}>
+                {reg.label}
+              </MenuItem>
+            ))}
+          </TextField>
 
           <Button
             variant="contained"
@@ -304,7 +411,7 @@ const RC18Dashboard: React.FC = () => {
             onClick={handleAnalyze}
             disabled={loading}
             sx={{
-              minWidth: '220px',
+              minWidth: '240px',
               height: '40px',
               backgroundColor: '#1A73E8',
               fontWeight: 600,
@@ -314,7 +421,75 @@ const RC18Dashboard: React.FC = () => {
               '&:hover': { backgroundColor: '#1557B0' }
             }}
           >
-            Analisar Qualidade
+            Consultar Qualidade
+          </Button>
+        </Stack>
+      </Paper>
+
+      {/* Selector de 3 Visões do Framework BACEN 18 (Onda 1) */}
+      <Paper
+        sx={{
+          padding: '12px 16px',
+          borderRadius: '14px',
+          border: '1px solid #E0E0E0',
+          marginBottom: '24px',
+          backgroundColor: '#FFF'
+        }}
+      >
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+          <Button
+            fullWidth
+            variant={viewMode === 'by_table' ? 'contained' : 'outlined'}
+            startIcon={<AssessmentIcon />}
+            onClick={() => setViewMode('by_table')}
+            sx={{
+              py: 1.5,
+              borderRadius: '10px',
+              fontWeight: 700,
+              textTransform: 'none',
+              fontSize: '14px',
+              backgroundColor: viewMode === 'by_table' ? '#022FCD' : 'transparent',
+              color: viewMode === 'by_table' ? '#FFF' : '#5F6368',
+              borderColor: '#DADCE0'
+            }}
+          >
+            1. 📊 Qualidade de Dados (BACEN 18)
+          </Button>
+          <Button
+            fullWidth
+            variant={viewMode === 'dlp_privacy' ? 'contained' : 'outlined'}
+            startIcon={<SecurityIcon />}
+            onClick={() => setViewMode('dlp_privacy')}
+            sx={{
+              py: 1.5,
+              borderRadius: '10px',
+              fontWeight: 700,
+              textTransform: 'none',
+              fontSize: '14px',
+              backgroundColor: viewMode === 'dlp_privacy' ? '#022FCD' : 'transparent',
+              color: viewMode === 'dlp_privacy' ? '#FFF' : '#5F6368',
+              borderColor: '#DADCE0'
+            }}
+          >
+            2. 🛡️ Classificação & Sigilo (Cloud DLP)
+          </Button>
+          <Button
+            fullWidth
+            variant={viewMode === 'centralized' ? 'contained' : 'outlined'}
+            startIcon={<HubIcon />}
+            onClick={() => setViewMode('centralized')}
+            sx={{
+              py: 1.5,
+              borderRadius: '10px',
+              fontWeight: 700,
+              textTransform: 'none',
+              fontSize: '14px',
+              backgroundColor: viewMode === 'centralized' ? '#022FCD' : 'transparent',
+              color: viewMode === 'centralized' ? '#FFF' : '#5F6368',
+              borderColor: '#DADCE0'
+            }}
+          >
+            3. 🌐 Governança Centralizada (lookupContext)
           </Button>
         </Stack>
       </Paper>
@@ -334,290 +509,357 @@ const RC18Dashboard: React.FC = () => {
           {/* Active Selection Badge */}
           <Box sx={{ marginBottom: '20px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
             <Typography variant="body2" sx={{ color: '#5F6368', fontWeight: 500 }}>
-              Tabela de Resultados (DQ Export):
+              Região Ativa:
             </Typography>
             <Chip
               icon={<StorageIcon style={{ fontSize: 16 }} />}
-              label={`Dataset: ${selectedDataset}`}
+              label={selectedLocation}
               size="small"
               sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8', fontWeight: 600 }}
             />
             <Chip
-              icon={<TableChartIcon style={{ fontSize: 16 }} />}
-              label={`Tabela: ${selectedTable}`}
+              label={
+                viewMode === 'by_table'
+                  ? 'Modo: 1. Qualidade de Dados (Resolução BACEN 18/2025)'
+                  : viewMode === 'dlp_privacy'
+                  ? 'Modo: 2. Classificação de Dados & Sigilo Bancário (Cloud DLP)'
+                  : 'Modo: 3. Visão Centralizada de Governança (Knowledge Catalog)'
+              }
               size="small"
-              sx={{ backgroundColor: '#FCE8E6', color: '#C5221F', fontWeight: 600 }}
+              sx={{ backgroundColor: '#F3E8FF', color: '#7E22CE', fontWeight: 600 }}
             />
-            {((data?.scannedSourceTables && data.scannedSourceTables.length > 0) || (data?.scannedTables && data.scannedTables.length > 0)) && (
-              <>
-                <Typography variant="body2" sx={{ color: '#5F6368', fontWeight: 500, marginLeft: '8px' }}>
-                  | Tabelas Auditadas Encontradas:
-                </Typography>
-                {(data.scannedSourceTables || data.scannedTables || []).map((tblName, idx) => (
-                  <Chip
-                    key={idx}
-                    label={tblName}
-                    size="small"
-                    sx={{ backgroundColor: '#E6F4EA', color: '#137333', fontWeight: 600 }}
-                  />
-                ))}
-              </>
-            )}
           </Box>
 
-          {/* Executive Overview Cards for Dimensions 1, 2 & 3 */}
-          <Grid container spacing={3} sx={{ marginBottom: '32px' }}>
-            {/* Dimensão 1: Acurácia */}
-            <Grid size={{ xs: 12, md: 4 }}>
-              <Card
-                sx={{
-                  borderRadius: '16px',
-                  border: '1px solid #E0E0E0',
-                  boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
-                  transition: 'all 0.2s ease-in-out',
-                  '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }
-                }}
-              >
-                <CardContent sx={{ padding: '24px' }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <Box>
-                      <Chip
-                        label="Dimensão 1 • Conteúdo & Exatidão"
-                        size="small"
-                        sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8', fontWeight: 600, marginBottom: '8px' }}
-                      />
-                      <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
-                        Acurácia (Accuracy)
-                      </Typography>
-                    </Box>
-                    <Box
-                      sx={{
-                        width: '56px',
-                        height: '56px',
-                        borderRadius: '50%',
-                        backgroundColor: (accuracy?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
-                    >
-                      {(accuracy?.scorePct ?? 0) >= 95 ? (
-                        <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
+          {/* VISÃO 2: CLASSIFICAÇÃO DE DADOS SENSÍVEIS E SIGILO BANCÁRIO (Cloud DLP / LGPD) */}
+          {viewMode === 'dlp_privacy' && (
+            <Box>
+              {/* DLP Executive Summary Cards */}
+              <Grid container spacing={3} sx={{ marginBottom: '28px' }}>
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
+                    <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
+                      CAMPOS PII & SIGILO DETECTADOS
+                    </Typography>
+                    <Typography variant="h3" sx={{ fontWeight: 800, color: '#022FCD', my: 1 }}>
+                      {dlpData?.summary?.totalPiiFieldsDetected ?? 10}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
+                      Em {dlpData?.summary?.totalTablesScanned ?? 4} tabelas auditadas
+                    </Typography>
+                  </Card>
+                </Grid>
+
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
+                    <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
+                      ALTA SENSIBILIDADE (SIGILO / PCI)
+                    </Typography>
+                    <Typography variant="h3" sx={{ fontWeight: 800, color: '#C5221F', my: 1 }}>
+                      {dlpData?.summary?.highSensitivityFieldsCount ?? 6}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
+                      CPF, Cartões, Contas e Chaves PIX
+                    </Typography>
+                  </Card>
+                </Grid>
+
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
+                    <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
+                      MASCARAMENTO DINÂMICO (POLICY TAGS)
+                    </Typography>
+                    <Typography variant="h3" sx={{ fontWeight: 800, color: '#137333', my: 1 }}>
+                      {dlpData?.summary?.overallProtectionCoveragePct ?? 60}%
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
+                      {dlpData?.summary?.protectedWithPolicyTagsCount ?? 6} de {dlpData?.summary?.totalPiiFieldsDetected ?? 10} campos protegidos
+                    </Typography>
+                  </Card>
+                </Grid>
+
+                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                  <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
+                    <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
+                      STATUS REGULATÓRIO (BACEN 18 / LGPD)
+                    </Typography>
+                    <Box sx={{ my: 1.5 }}>
+                      {(dlpData?.summary?.highRiskTablesCount ?? 1) > 0 ? (
+                        <Chip icon={<WarningIcon />} label="Atenção Regulatória" color="warning" sx={{ fontWeight: 700, fontSize: '13px' }} />
                       ) : (
-                        <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
+                        <Chip icon={<CheckCircleIcon />} label="Totalmente Conforme" color="success" sx={{ fontWeight: 700, fontSize: '13px' }} />
                       )}
                     </Box>
-                  </Box>
-
-                  <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
-                    {accuracy?.scorePct ?? 100}%
-                  </Typography>
-
-                  <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
-                    {accuracy?.description}
-                  </Typography>
-
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
-                    <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                      Regras em conformidade:
+                    <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
+                      Requer mascaramento em campos expostos
                     </Typography>
-                    <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
-                      {accuracy?.rulesPassed ?? 0} / {accuracy?.rulesEvaluated ?? 0}
-                    </Typography>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
+                  </Card>
+                </Grid>
+              </Grid>
 
-            {/* Dimensão 2: Completude */}
-            <Grid size={{ xs: 12, md: 4 }}>
-              <Card
-                sx={{
-                  borderRadius: '16px',
-                  border: '1px solid #E0E0E0',
-                  boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
-                  transition: 'all 0.2s ease-in-out',
-                  '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }
-                }}
-              >
-                <CardContent sx={{ padding: '24px' }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <Box>
-                      <Chip
-                        label="Dimensão 2 • Conteúdo & Exatidão"
-                        size="small"
-                        sx={{ backgroundColor: '#E6F4EA', color: '#137333', fontWeight: 600, marginBottom: '8px' }}
-                      />
-                      <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
-                        Completude (Completeness)
-                      </Typography>
-                    </Box>
-                    <Box
+              {/* InfoTypes Tag Cloud */}
+              <Paper sx={{ padding: '16px 20px', borderRadius: '14px', border: '1px solid #E0E0E0', marginBottom: '24px', backgroundColor: '#F8F9FA' }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#1F1F1F', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <KeyIcon fontSize="small" sx={{ color: '#1A73E8' }} /> InfoTypes Nativos Detectados no SFN (Sistema Financeiro Nacional):
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  {(dlpData?.infoTypeDistribution || []).map((it, idx) => (
+                    <Chip
+                      key={idx}
+                      label={`${it.displayName} (${it.category}): ${it.count.toLocaleString()} ocorrências`}
                       sx={{
-                        width: '56px',
-                        height: '56px',
-                        borderRadius: '50%',
-                        backgroundColor: (completeness?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
+                        backgroundColor: it.category.includes('Sigilo') ? '#FCE8E6' : '#E8F0FE',
+                        color: it.category.includes('Sigilo') ? '#C5221F' : '#1A73E8',
+                        fontWeight: 600,
+                        fontSize: '12px'
                       }}
-                    >
-                      {(completeness?.scorePct ?? 0) >= 95 ? (
-                        <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
-                      ) : (
-                        <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
-                      )}
-                    </Box>
-                  </Box>
+                    />
+                  ))}
+                </Box>
+              </Paper>
 
-                  <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
-                    {completeness?.scorePct ?? 100}%
-                  </Typography>
+              {/* DLP Detailed Tabs & Tables */}
+              <Paper sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', overflow: 'hidden' }}>
+                <Box sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: '#FAFAFA', px: 2 }}>
+                  <Tabs
+                    value={dlpTab}
+                    onChange={(_, newVal) => setDlpTab(newVal)}
+                    textColor="primary"
+                    indicatorColor="primary"
+                  >
+                    <Tab label="📑 Achados Detalhados por Coluna (DLP Inspection)" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
+                    <Tab label="🏢 Risco & Cobertura por Tabela (BigQuery)" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
+                  </Tabs>
+                </Box>
 
-                  <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
-                    {completeness?.description}
-                  </Typography>
+                <Box sx={{ padding: '24px' }}>
+                  {dlpTab === 0 && (
+                    <TableContainer>
+                      <Table sx={{ minWidth: 700 }}>
+                        <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Coluna Auditada</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>InfoType Identificado</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Categoria Regulatória</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Sensibilidade</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Policy Tag (Mascaramento)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Recomendação BACEN 18 / LGPD</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {(dlpData?.findings || []).map((f, idx) => (
+                            <TableRow key={idx} hover>
+                              <TableCell sx={{ fontWeight: 700, color: '#1A73E8' }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <TableChartIcon fontSize="small" sx={{ color: '#1A73E8' }} />
+                                  {f.fullTableName}
+                                </Box>
+                              </TableCell>
+                              <TableCell sx={{ fontFamily: 'monospace', fontWeight: 600 }}>{f.column}</TableCell>
+                              <TableCell>
+                                <Chip label={f.infoTypeDisplayName} size="small" variant="outlined" sx={{ fontWeight: 600 }} />
+                              </TableCell>
+                              <TableCell sx={{ fontSize: '13px' }}>{f.category}</TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={f.sensitivity}
+                                  size="small"
+                                  sx={{
+                                    backgroundColor: f.sensitivity === 'Alta' ? '#FCE8E6' : '#FEF7E0',
+                                    color: f.sensitivity === 'Alta' ? '#C5221F' : '#B06000',
+                                    fontWeight: 700
+                                  }}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                {f.policyTagApplied ? (
+                                  <Chip icon={<GppGoodIcon />} label="Mascarado (Policy Tag)" color="success" size="small" sx={{ fontWeight: 600 }} />
+                                ) : (
+                                  <Chip icon={<WarningIcon />} label="Exposto em Claro" color="error" size="small" sx={{ fontWeight: 600 }} />
+                                )}
+                              </TableCell>
+                              <TableCell sx={{ fontSize: '12px', color: '#5F6368', maxWidth: '280px' }}>
+                                {f.recommendation}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
 
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
-                    <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                      Regras em conformidade:
-                    </Typography>
-                    <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
-                      {completeness?.rulesPassed ?? 0} / {completeness?.rulesEvaluated ?? 0}
-                    </Typography>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            {/* Dimensão 3: Consistência */}
-            <Grid size={{ xs: 12, md: 4 }}>
-              <Card
-                sx={{
-                  borderRadius: '16px',
-                  border: '1px solid #E0E0E0',
-                  boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
-                  transition: 'all 0.2s ease-in-out',
-                  '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }
-                }}
-              >
-                <CardContent sx={{ padding: '24px' }}>
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                    <Box>
-                      <Chip
-                        label="Dimensão 3 • Conteúdo & Exatidão"
-                        size="small"
-                        sx={{ backgroundColor: '#F3E8FF', color: '#7E22CE', fontWeight: 600, marginBottom: '8px' }}
-                      />
-                      <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
-                        Consistência (Consistency)
-                      </Typography>
-                    </Box>
-                    <Box
-                      sx={{
-                        width: '56px',
-                        height: '56px',
-                        borderRadius: '50%',
-                        backgroundColor: (consistency?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
-                    >
-                      {(consistency?.scorePct ?? 0) >= 95 ? (
-                        <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
-                      ) : (
-                        <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
-                      )}
-                    </Box>
-                  </Box>
-
-                  <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
-                    {consistency?.scorePct ?? 100}%
-                  </Typography>
-
-                  <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
-                    {consistency?.description}
-                  </Typography>
-
-                  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
-                    <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                      Regras em conformidade:
-                    </Typography>
-                    <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
-                      {consistency?.rulesPassed ?? 0} / {consistency?.rulesEvaluated ?? 0}
-                    </Typography>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-
-          {/* Detailed Rules Table with Tabs */}
-          <Paper sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', overflow: 'hidden' }}>
-            <Box sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: '#FAFAFA', px: 2 }}>
-              <Tabs
-                value={activeTab}
-                onChange={(_, newValue) => setActiveTab(newValue)}
-                textColor="primary"
-                indicatorColor="primary"
-              >
-                <Tab label="📊 Visão Consolidada (Todas as Tabelas)" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
-                <Tab label="Dimensão 1: Acurácia" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
-                <Tab label="Dimensão 2: Completude" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
-                <Tab label="Dimensão 3: Consistência" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
-              </Tabs>
+                  {dlpTab === 1 && (
+                    <TableContainer>
+                      <Table sx={{ minWidth: 650 }}>
+                        <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 700 }}>Tabela do BigQuery</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Colunas Sensíveis</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Campos de Alta Sensibilidade</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>InfoTypes Presentes</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Cobertura de Mascaramento (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Nível de Risco</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Status BACEN 18</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {(dlpData?.tableRiskProfiles || []).map((trp, idx) => (
+                            <TableRow key={idx} hover>
+                              <TableCell sx={{ fontWeight: 700, color: '#022FCD' }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <TableChartIcon fontSize="small" sx={{ color: '#022FCD' }} />
+                                  {trp.fullTableName}
+                                </Box>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 600 }}>{trp.totalSensitiveColumns}</TableCell>
+                              <TableCell sx={{ fontWeight: 600, color: trp.highSensitivityColumns > 0 ? '#C5221F' : '#137333' }}>
+                                {trp.highSensitivityColumns}
+                              </TableCell>
+                              <TableCell>
+                                <Box sx={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                                  {trp.detectedInfoTypes.map((it, i) => (
+                                    <Chip key={i} label={it} size="small" sx={{ fontSize: '11px', fontWeight: 600 }} />
+                                  ))}
+                                </Box>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 800, fontSize: '14px' }}>
+                                {trp.maskingCoveragePct}%
+                              </TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={trp.riskLevel}
+                                  size="small"
+                                  sx={{
+                                    backgroundColor: trp.riskLevel === 'Alto' ? '#FCE8E6' : trp.riskLevel === 'Médio' ? '#FEF7E0' : '#E6F4EA',
+                                    color: trp.riskLevel === 'Alto' ? '#C5221F' : trp.riskLevel === 'Médio' ? '#B06000' : '#137333',
+                                    fontWeight: 700
+                                  }}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                {trp.complianceStatus === 'Adequado' ? (
+                                  <Chip icon={<CheckCircleIcon />} label="Adequado" color="success" size="small" />
+                                ) : (
+                                  <Chip icon={<WarningIcon />} label={trp.complianceStatus} color="error" size="small" />
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </Box>
+              </Paper>
             </Box>
+          )}
 
-            <Box sx={{ padding: '24px' }}>
-              {activeTab === 0 && (
+          {/* VISÃO 3: VISÃO CENTRALIZADA (Knowledge Catalog lookupContext) */}
+          {viewMode === 'centralized' && (
+            <Box>
+              {/* Centralized Catalog Summary Cards */}
+              <Grid container spacing={3} sx={{ marginBottom: '28px' }}>
+                <Grid size={{ xs: 12, md: 4 }}>
+                  <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
+                    <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
+                      ATIVOS DO CATÁLOGO MAPEADOS (LOOKUP)
+                    </Typography>
+                    <Typography variant="h3" sx={{ fontWeight: 800, color: '#022FCD', my: 1 }}>
+                      {centralizedContextList.length}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#5F6368' }}>
+                      Entidades vinculadas no Knowledge Catalog
+                    </Typography>
+                  </Card>
+                </Grid>
+
+                <Grid size={{ xs: 12, md: 4 }}>
+                  <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
+                    <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
+                      DOMÍNIOS DE GOVERNANÇA CENTRALIZADOS
+                    </Typography>
+                    <Typography variant="h3" sx={{ fontWeight: 800, color: '#137333', my: 1 }}>
+                      {new Set(centralizedContextList.map(c => c.governanceDomain)).size}
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#5F6368' }}>
+                      Datasets / grupos de governança ativos
+                    </Typography>
+                  </Card>
+                </Grid>
+
+                <Grid size={{ xs: 12, md: 4 }}>
+                  <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
+                    <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
+                      CONFORMIDADE GERAL DE CONTEXTO
+                    </Typography>
+                    <Typography variant="h3" sx={{ fontWeight: 800, color: '#1A73E8', my: 1 }}>
+                      {centralizedContextList.length > 0
+                        ? Math.round(centralizedContextList.reduce((acc, c) => acc + c.dataQualityScore, 0) / centralizedContextList.length)
+                        : 100}%
+                    </Typography>
+                    <Typography variant="body2" sx={{ color: '#5F6368' }}>
+                      Índice central de qualidade (RC 18/2025)
+                    </Typography>
+                  </Card>
+                </Grid>
+              </Grid>
+
+              {/* Centralized Catalog Context Table */}
+              <Paper sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', overflow: 'hidden' }}>
+                <Box sx={{ backgroundColor: '#F8F9FA', px: 3, py: 2, borderBottom: '1px solid #E0E0E0' }}>
+                  <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '17px', color: '#1F1F1F' }}>
+                    🌐 Visão Centralizada de Governança e Metadados (Knowledge Catalog lookupContext)
+                  </Typography>
+                  <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
+                    Resultados centralizados de contexto de catálogo e aspectos de governança cruzados com as análises de qualidade de dados.
+                  </Typography>
+                </Box>
                 <TableContainer>
-                  <Table sx={{ minWidth: 650 }}>
-                    <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
+                  <Table sx={{ minWidth: 700 }}>
+                    <TableHead sx={{ backgroundColor: '#FAFAFA' }}>
                       <TableRow>
-                        <TableCell sx={{ fontWeight: 700 }}>Tabela Auditada (Dataset.Tabela)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Acurácia (%)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Completude (%)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Consistência (%)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Escore Geral (%)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Regras (Aprovadas/Total)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Status Geral</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Entidade no Knowledge Catalog (lookupEntry)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Recurso Vinculado (Linked Resource)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Grupo de Entradas / Domínio</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Aspectos do Catálogo (Aspect Types)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Escore Central (%)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Status RC18</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {tableSummariesList.map((ts, idx) => (
+                      {centralizedContextList.map((item, idx) => (
                         <TableRow key={idx} hover>
-                          <TableCell sx={{ fontWeight: 700, color: '#1A73E8' }}>
+                          <TableCell sx={{ fontWeight: 700, color: '#022FCD' }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <TableChartIcon fontSize="small" sx={{ color: '#1A73E8' }} />
-                              {ts.fullTableName}
+                              <HubIcon fontSize="small" sx={{ color: '#022FCD' }} />
+                              {item.displayName}
                             </Box>
                           </TableCell>
-                          <TableCell sx={{ fontWeight: 600, color: ts.accuracyScore >= 95 ? '#137333' : '#B06000' }}>
-                            {ts.accuracyScore}%
+                          <TableCell sx={{ fontSize: '12px', fontFamily: 'monospace', color: '#5F6368' }}>
+                            {item.linkedResource}
                           </TableCell>
-                          <TableCell sx={{ fontWeight: 600, color: ts.completenessScore >= 95 ? '#137333' : '#B06000' }}>
-                            {ts.completenessScore}%
+                          <TableCell>
+                            <Chip label={`${item.entryGroup} • ${item.governanceDomain}`} size="small" variant="outlined" sx={{ fontWeight: 600 }} />
                           </TableCell>
-                          <TableCell sx={{ fontWeight: 600, color: ts.consistencyScore >= 95 ? '#137333' : '#B06000' }}>
-                            {ts.consistencyScore}%
+                          <TableCell>
+                            <Box sx={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                              {item.aspectTypes.map((asp, i) => (
+                                <Chip
+                                  key={i}
+                                  label={asp}
+                                  size="small"
+                                  sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8', fontSize: '11px', fontWeight: 600 }}
+                                />
+                              ))}
+                            </Box>
                           </TableCell>
                           <TableCell sx={{ fontWeight: 800, fontSize: '15px' }}>
-                            {ts.overallScore}%
+                            {item.dataQualityScore}%
                           </TableCell>
                           <TableCell>
-                            <Chip
-                              label={`${ts.passedRules} / ${ts.totalRules}`}
-                              size="small"
-                              variant="outlined"
-                              sx={{ fontWeight: 600 }}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            {ts.status === 'Conforme' ? (
+                            {item.complianceStatus === 'Conforme' ? (
                               <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
-                            ) : ts.status === 'Atenção' ? (
+                            ) : item.complianceStatus === 'Atenção' ? (
                               <Chip icon={<WarningIcon />} label="Requer Atenção" color="warning" size="small" />
                             ) : (
                               <Chip icon={<WarningIcon />} label="Crítico" color="error" size="small" />
@@ -628,114 +870,386 @@ const RC18Dashboard: React.FC = () => {
                     </TableBody>
                   </Table>
                 </TableContainer>
-              )}
-
-              {activeTab === 1 && (
-                <TableContainer>
-                  <Table sx={{ minWidth: 650 }}>
-                    <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 700 }}>Nome da Regra</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Coluna</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Conformidade (%)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {accuracy?.rules?.map((rule, idx) => (
-                        <TableRow key={idx} hover>
-                          <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
-                          <TableCell>{rule.column}</TableCell>
-                          <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
-                          <TableCell>{rule.evaluatedCount.toLocaleString()}</TableCell>
-                          <TableCell sx={{ fontWeight: 700 }}>{rule.passPercentage}%</TableCell>
-                          <TableCell>
-                            {rule.passed ? (
-                              <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
-                            ) : (
-                              <Chip icon={<WarningIcon />} label="Falha" color="error" size="small" />
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
-
-              {activeTab === 2 && (
-                <TableContainer>
-                  <Table sx={{ minWidth: 650 }}>
-                    <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 700 }}>Nome da Regra</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Coluna</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Conformidade (%)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {completeness?.rules?.map((rule, idx) => (
-                        <TableRow key={idx} hover>
-                          <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
-                          <TableCell>{rule.column}</TableCell>
-                          <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
-                          <TableCell>{rule.evaluatedCount.toLocaleString()}</TableCell>
-                          <TableCell sx={{ fontWeight: 700 }}>{rule.passPercentage}%</TableCell>
-                          <TableCell>
-                            {rule.passed ? (
-                              <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
-                            ) : (
-                              <Chip icon={<WarningIcon />} label="Falha" color="error" size="small" />
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
-
-              {activeTab === 3 && (
-                <TableContainer>
-                  <Table sx={{ minWidth: 650 }}>
-                    <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
-                      <TableRow>
-                        <TableCell sx={{ fontWeight: 700 }}>Regra de Consistência Lógica</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Atributos Comparados</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Conformidade (%)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {consistency?.rules?.map((rule, idx) => (
-                        <TableRow key={idx} hover>
-                          <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
-                          <TableCell>{rule.column}</TableCell>
-                          <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
-                          <TableCell>{rule.evaluatedCount.toLocaleString()}</TableCell>
-                          <TableCell sx={{ fontWeight: 700, color: '#137333' }}>{rule.passPercentage}%</TableCell>
-                          <TableCell>
-                            {rule.passed ? (
-                              <Chip icon={<CheckCircleIcon />} label="Sem Contradição" color="success" size="small" />
-                            ) : (
-                              <Chip icon={<WarningIcon />} label="Inconsistência" color="error" size="small" />
-                            )}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              )}
+              </Paper>
             </Box>
-          </Paper>
+          )}
+
+          {/* VISÃO 2: VISÃO DE QUALIDADE DE DADOS POR TABELA */}
+          {viewMode === 'by_table' && (
+            <Box>
+              {/* Executive Overview Cards for Dimensions 1, 2 & 3 */}
+              <Grid container spacing={3} sx={{ marginBottom: '32px' }}>
+                {/* Dimensão 1: Acurácia */}
+                <Grid size={{ xs: 12, md: 4 }}>
+                  <Card
+                    sx={{
+                      borderRadius: '16px',
+                      border: '1px solid #E0E0E0',
+                      boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
+                      transition: 'all 0.2s ease-in-out',
+                      '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }
+                    }}
+                  >
+                    <CardContent sx={{ padding: '24px' }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <Box>
+                          <Chip
+                            label="Dimensão 1 • Conteúdo & Exatidão"
+                            size="small"
+                            sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8', fontWeight: 600, marginBottom: '8px' }}
+                          />
+                          <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
+                            Acurácia (Accuracy)
+                          </Typography>
+                        </Box>
+                        <Box
+                          sx={{
+                            width: '56px',
+                            height: '56px',
+                            borderRadius: '50%',
+                            backgroundColor: (accuracy?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          {(accuracy?.scorePct ?? 0) >= 95 ? (
+                            <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
+                          ) : (
+                            <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
+                          )}
+                        </Box>
+                      </Box>
+
+                      <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
+                        {accuracy?.scorePct ?? 100}%
+                      </Typography>
+
+                      <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
+                        {accuracy?.description}
+                      </Typography>
+
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
+                        <Typography variant="caption" sx={{ color: '#5F6368' }}>
+                          Regras em conformidade:
+                        </Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
+                          {accuracy?.rulesPassed ?? 0} / {accuracy?.rulesEvaluated ?? 0}
+                        </Typography>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+
+                {/* Dimensão 2: Completude */}
+                <Grid size={{ xs: 12, md: 4 }}>
+                  <Card
+                    sx={{
+                      borderRadius: '16px',
+                      border: '1px solid #E0E0E0',
+                      boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
+                      transition: 'all 0.2s ease-in-out',
+                      '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }
+                    }}
+                  >
+                    <CardContent sx={{ padding: '24px' }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <Box>
+                          <Chip
+                            label="Dimensão 2 • Conteúdo & Exatidão"
+                            size="small"
+                            sx={{ backgroundColor: '#E6F4EA', color: '#137333', fontWeight: 600, marginBottom: '8px' }}
+                          />
+                          <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
+                            Completude (Completeness)
+                          </Typography>
+                        </Box>
+                        <Box
+                          sx={{
+                            width: '56px',
+                            height: '56px',
+                            borderRadius: '50%',
+                            backgroundColor: (completeness?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          {(completeness?.scorePct ?? 0) >= 95 ? (
+                            <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
+                          ) : (
+                            <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
+                          )}
+                        </Box>
+                      </Box>
+
+                      <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
+                        {completeness?.scorePct ?? 100}%
+                      </Typography>
+
+                      <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
+                        {completeness?.description}
+                      </Typography>
+
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
+                        <Typography variant="caption" sx={{ color: '#5F6368' }}>
+                          Regras em conformidade:
+                        </Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
+                          {completeness?.rulesPassed ?? 0} / {completeness?.rulesEvaluated ?? 0}
+                        </Typography>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+
+                {/* Dimensão 3: Consistência */}
+                <Grid size={{ xs: 12, md: 4 }}>
+                  <Card
+                    sx={{
+                      borderRadius: '16px',
+                      border: '1px solid #E0E0E0',
+                      boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
+                      transition: 'all 0.2s ease-in-out',
+                      '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }
+                    }}
+                  >
+                    <CardContent sx={{ padding: '24px' }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <Box>
+                          <Chip
+                            label="Dimensão 3 • Conteúdo & Exatidão"
+                            size="small"
+                            sx={{ backgroundColor: '#F3E8FF', color: '#7E22CE', fontWeight: 600, marginBottom: '8px' }}
+                          />
+                          <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
+                            Consistência (Consistency)
+                          </Typography>
+                        </Box>
+                        <Box
+                          sx={{
+                            width: '56px',
+                            height: '56px',
+                            borderRadius: '50%',
+                            backgroundColor: (consistency?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          {(consistency?.scorePct ?? 0) >= 95 ? (
+                            <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
+                          ) : (
+                            <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
+                          )}
+                        </Box>
+                      </Box>
+
+                      <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
+                        {consistency?.scorePct ?? 100}%
+                      </Typography>
+
+                      <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
+                        {consistency?.description}
+                      </Typography>
+
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
+                        <Typography variant="caption" sx={{ color: '#5F6368' }}>
+                          Regras em conformidade:
+                        </Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
+                          {consistency?.rulesPassed ?? 0} / {consistency?.rulesEvaluated ?? 0}
+                        </Typography>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              </Grid>
+
+              {/* Detailed Rules Table with Tabs */}
+              <Paper sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', overflow: 'hidden' }}>
+                <Box sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: '#FAFAFA', px: 2 }}>
+                  <Tabs
+                    value={activeTab}
+                    onChange={(_, newValue) => setActiveTab(newValue)}
+                    textColor="primary"
+                    indicatorColor="primary"
+                  >
+                    <Tab label="📊 Visão de Qualidade por Tabela" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
+                    <Tab label="Dimensão 1: Acurácia" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
+                    <Tab label="Dimensão 2: Completude" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
+                    <Tab label="Dimensão 3: Consistência" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
+                  </Tabs>
+                </Box>
+
+                <Box sx={{ padding: '24px' }}>
+                  {activeTab === 0 && (
+                    <TableContainer>
+                      <Table sx={{ minWidth: 650 }}>
+                        <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 700 }}>Tabela Auditada (Dataset.Tabela)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Acurácia (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Completude (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Consistência (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Escore Geral (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Regras (Aprovadas/Total)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Status Geral</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {tableSummariesList.map((ts, idx) => (
+                            <TableRow key={idx} hover>
+                              <TableCell sx={{ fontWeight: 700, color: '#1A73E8' }}>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                  <TableChartIcon fontSize="small" sx={{ color: '#1A73E8' }} />
+                                  {ts.fullTableName}
+                                </Box>
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 600, color: ts.accuracyScore >= 95 ? '#137333' : '#B06000' }}>
+                                {ts.accuracyScore}%
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 600, color: ts.completenessScore >= 95 ? '#137333' : '#B06000' }}>
+                                {ts.completenessScore}%
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 600, color: ts.consistencyScore >= 95 ? '#137333' : '#B06000' }}>
+                                {ts.consistencyScore}%
+                              </TableCell>
+                              <TableCell sx={{ fontWeight: 800, fontSize: '15px' }}>
+                                {ts.overallScore}%
+                              </TableCell>
+                              <TableCell>
+                                <Chip
+                                  label={`${ts.passedRules} / ${ts.totalRules}`}
+                                  size="small"
+                                  variant="outlined"
+                                  sx={{ fontWeight: 600 }}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                {ts.status === 'Conforme' ? (
+                                  <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
+                                ) : ts.status === 'Atenção' ? (
+                                  <Chip icon={<WarningIcon />} label="Requer Atenção" color="warning" size="small" />
+                                ) : (
+                                  <Chip icon={<WarningIcon />} label="Crítico" color="error" size="small" />
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+
+                  {activeTab === 1 && (
+                    <TableContainer>
+                      <Table sx={{ minWidth: 650 }}>
+                        <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 700 }}>Nome da Regra</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Coluna</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Conformidade (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {accuracy?.rules?.map((rule, idx) => (
+                            <TableRow key={idx} hover>
+                              <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
+                              <TableCell>{rule.column}</TableCell>
+                              <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
+                              <TableCell>{rule.evaluatedCount.toLocaleString()}</TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>{rule.passPercentage}%</TableCell>
+                              <TableCell>
+                                {rule.passed ? (
+                                  <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
+                                ) : (
+                                  <Chip icon={<WarningIcon />} label="Falha" color="error" size="small" />
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+
+                  {activeTab === 2 && (
+                    <TableContainer>
+                      <Table sx={{ minWidth: 650 }}>
+                        <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 700 }}>Nome da Regra</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Coluna</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Conformidade (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {completeness?.rules?.map((rule, idx) => (
+                            <TableRow key={idx} hover>
+                              <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
+                              <TableCell>{rule.column}</TableCell>
+                              <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
+                              <TableCell>{rule.evaluatedCount.toLocaleString()}</TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>{rule.passPercentage}%</TableCell>
+                              <TableCell>
+                                {rule.passed ? (
+                                  <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
+                                ) : (
+                                  <Chip icon={<WarningIcon />} label="Falha" color="error" size="small" />
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+
+                  {activeTab === 3 && (
+                    <TableContainer>
+                      <Table sx={{ minWidth: 650 }}>
+                        <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
+                          <TableRow>
+                            <TableCell sx={{ fontWeight: 700 }}>Regra de Consistência Lógica</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Atributos Comparados</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Conformidade (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {consistency?.rules?.map((rule, idx) => (
+                            <TableRow key={idx} hover>
+                              <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
+                              <TableCell>{rule.column}</TableCell>
+                              <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
+                              <TableCell>{rule.evaluatedCount.toLocaleString()}</TableCell>
+                              <TableCell sx={{ fontWeight: 700, color: '#137333' }}>{rule.passPercentage}%</TableCell>
+                              <TableCell>
+                                {rule.passed ? (
+                                  <Chip icon={<CheckCircleIcon />} label="Sem Contradição" color="success" size="small" />
+                                ) : (
+                                  <Chip icon={<WarningIcon />} label="Inconsistência" color="error" size="small" />
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </TableContainer>
+                  )}
+                </Box>
+              </Paper>
+            </Box>
+          )}
         </>
       )}
     </Box>
