@@ -38,6 +38,7 @@ import CodeIcon from '@mui/icons-material/Code';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import axios from 'axios';
 import { useAuth } from '../../auth/AuthProvider';
+import { URLS } from '../../constants/urls';
 
 interface RuleDetail {
   ruleName: string;
@@ -85,7 +86,9 @@ interface CatalogContextItem {
   displayName: string;
   linkedResource: string;
   entryGroup: string;
+  entryLocation?: string;
   aspectTypes: string[];
+  hasScorecardAspect?: boolean;
   governanceDomain: string;
   dataQualityScore: number;
   complianceStatus: 'Conforme' | 'Atenção' | 'Crítico';
@@ -142,6 +145,8 @@ interface InfoTypeDistributionItem {
 
 interface DlpResponse {
   success: boolean;
+  isDemoFallback?: boolean;
+  projectId?: string;
   timestamp: string;
   location: string;
   summary: DlpSummary;
@@ -202,6 +207,8 @@ interface LineageSummary {
 
 interface LineageResponse {
   success: boolean;
+  isDemoFallback?: boolean;
+  projectId?: string;
   timestamp: string;
   location: string;
   summary: LineageSummary;
@@ -212,6 +219,9 @@ interface LineageResponse {
 
 interface RC18Response {
   success: boolean;
+  isDemoFallback?: boolean;
+  projectId?: string;
+  location?: string;
   timestamp: string;
   dataset?: string;
   table?: string;
@@ -224,16 +234,18 @@ interface RC18Response {
   scannedSourceTables?: string[];
   tableSummaries?: TableSummary[];
   centralizedCatalogContext?: CatalogContextItem[];
+  lookupContextYaml?: string | null;
   totalScansFound?: number;
   totalRulesEvaluated?: number;
 }
 
 const AVAILABLE_REGIONS = [
+  { value: 'global', label: 'global (Multi-Região Automática - Recomendado)' },
+  { value: 'southamerica-east1', label: 'southamerica-east1 (América do Sul - São Paulo)' },
   { value: 'us-central1', label: 'us-central1 (EUA Central - Iowa)' },
   { value: 'us-east1', label: 'us-east1 (EUA Leste - Carolina do Sul)' },
   { value: 'us-east4', label: 'us-east4 (EUA Leste - Virgínia)' },
   { value: 'us-west1', label: 'us-west1 (EUA Oeste - Oregon)' },
-  { value: 'southamerica-east1', label: 'southamerica-east1 (América do Sul - São Paulo)' },
   { value: 'europe-west1', label: 'europe-west1 (Europa Ocidental - Bélgica)' },
   { value: 'asia-east1', label: 'asia-east1 (Ásia Leste - Taiwan)' }
 ];
@@ -251,19 +263,19 @@ const RC18Dashboard: React.FC = () => {
   const [viewMode, setViewMode] = useState<'by_table' | 'dlp_privacy' | 'lineage_traceability' | 'centralized'>('by_table');
   const [selectedLineageTable, setSelectedLineageTable] = useState<string | null>(null);
 
-  // Dataplex & Cloud DLP Selection State
-  const [selectedLocation, setSelectedLocation] = useState<string>('us-central1');
+  // Knowledge Catalog & Cloud DLP Selection State (defaults to multi-region discovery)
+  const [selectedLocation, setSelectedLocation] = useState<string>('global');
 
-  // Fetch Quality Dimensions, Cloud DLP Sensitive Data & Lineage in parallel
+  // Fetch Quality Dimensions, Cloud DLP Sensitive Data & Lineage in parallel using configured API_URL
   const fetchFrameworkData = async (location: string = selectedLocation) => {
     setLoading(true);
     setError(null);
     try {
       const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
       const [dqRes, dlpRes, linRes] = await Promise.all([
-        axios.get('/api/v1/rc18/data-quality-dimensions', { params: { location }, headers }),
-        axios.get('/api/v1/rc18/dlp-sensitive-data', { params: { location }, headers }),
-        axios.get('/api/v1/rc18/lineage-traceability', { params: { location }, headers })
+        axios.get(`${URLS.API_URL}/rc18/data-quality-dimensions`, { params: { location }, headers }),
+        axios.get(`${URLS.API_URL}/rc18/dlp-sensitive-data`, { params: { location }, headers }),
+        axios.get(`${URLS.API_URL}/rc18/lineage-traceability`, { params: { location }, headers })
       ]);
       setData(dqRes.data);
       setDlpData(dlpRes.data);
@@ -595,11 +607,11 @@ const RC18Dashboard: React.FC = () => {
           {/* Active Selection Badge */}
           <Box sx={{ marginBottom: '20px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
             <Typography variant="body2" sx={{ color: '#5F6368', fontWeight: 500 }}>
-              Região Ativa:
+              Escopo Ativo:
             </Typography>
             <Chip
               icon={<StorageIcon style={{ fontSize: 16 }} />}
-              label={selectedLocation}
+              label={data?.projectId ? `${data.projectId} (${selectedLocation})` : selectedLocation}
               size="small"
               sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8', fontWeight: 600 }}
             />
@@ -616,6 +628,27 @@ const RC18Dashboard: React.FC = () => {
               size="small"
               sx={{ backgroundColor: '#F3E8FF', color: '#7E22CE', fontWeight: 600 }}
             />
+            {(viewMode === 'by_table' || viewMode === 'centralized') && data?.isDemoFallback === false && (
+              <Chip
+                icon={<CheckCircleIcon style={{ fontSize: 16 }} />}
+                label="Dados Reais da API Knowledge Catalog / Dataplex"
+                color="success"
+                size="small"
+                sx={{ fontWeight: 600 }}
+              />
+            )}
+            {((viewMode === 'by_table' && data?.isDemoFallback) ||
+              (viewMode === 'dlp_privacy' && dlpData?.isDemoFallback) ||
+              (viewMode === 'lineage_traceability' && lineageData?.isDemoFallback)) && (
+              <Chip
+                icon={<GppGoodIcon style={{ fontSize: 16 }} />}
+                label="Modo Referência Sintética (Crie ativos/scans no projeto para dados ao vivo)"
+                color="info"
+                variant="outlined"
+                size="small"
+                sx={{ fontWeight: 600 }}
+              />
+            )}
           </Box>
 
           {/* VISÃO 2: CLASSIFICAÇÃO DE DADOS SENSÍVEIS E SIGILO BANCÁRIO (Cloud DLP / LGPD) */}
@@ -1281,6 +1314,35 @@ const RC18Dashboard: React.FC = () => {
                   </Table>
                 </TableContainer>
               </Paper>
+
+              {data?.lookupContextYaml && (
+                <Paper sx={{ mt: 3, borderRadius: '16px', border: '1px solid #E0E0E0', overflow: 'hidden' }}>
+                  <Box sx={{ backgroundColor: '#F8F9FA', px: 3, py: 2, borderBottom: '1px solid #E0E0E0' }}>
+                    <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#1F1F1F' }}>
+                      📄 Contexto Semântico Unificado (Resposta Real `POST :lookupContext` YAML)
+                    </Typography>
+                    <Typography variant="caption" sx={{ color: '#5F6368' }}>
+                      Bundle estruturado retornado pelo Context Engine do Knowledge Catalog para agentes de IA e governança centralizada.
+                    </Typography>
+                  </Box>
+                  <Box
+                    component="pre"
+                    sx={{
+                      m: 0,
+                      p: 2.5,
+                      maxHeight: '320px',
+                      overflow: 'auto',
+                      backgroundColor: '#0F172A',
+                      color: '#E2E8F0',
+                      fontSize: '12px',
+                      fontFamily: 'monospace',
+                      lineHeight: 1.5
+                    }}
+                  >
+                    {data.lookupContextYaml}
+                  </Box>
+                </Paper>
+              )}
             </Box>
           )}
 

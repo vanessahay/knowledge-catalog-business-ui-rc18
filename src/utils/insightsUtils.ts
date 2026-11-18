@@ -12,8 +12,8 @@ export interface GroupedQueries {
 }
 
 /**
- * Format ISO date string to display format
- * Example: "February 5, 2026 at 5:49:40 PM UTC+5:30"
+ * Format ISO date string to display format (in the viewer's local timezone)
+ * Example: "February 5, 2026 at 5:49:40 PM"
  */
 export const formatInsightDate = (isoString: string): string => {
   const date = new Date(isoString);
@@ -25,8 +25,7 @@ export const formatInsightDate = (isoString: string): string => {
     hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',
-    hour12: true,
-    timeZoneName: 'shortOffset'
+    hour12: true
   };
 
   return date.toLocaleString('en-US', options);
@@ -76,6 +75,23 @@ export const getMostRecentSuccessfulJob = (jobs: InsightJob[]): InsightJob | nul
   if (successfulJobs.length === 0) return null;
 
   // Sort by startTime descending and return the first one
+  return successfulJobs.sort(
+    (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
+  )[0];
+};
+
+/**
+ * Get the most recent successful job that contains a datasetResult.
+ * Dataset scans return `datasetResult` (overview / queries / schemaRelationships)
+ * instead of the `tableResult` used by table scans.
+ */
+export const getMostRecentSuccessfulDatasetJob = (jobs: InsightJob[]): InsightJob | null => {
+  const successfulJobs = jobs.filter(
+    job => job.state === 'SUCCEEDED' && job.dataDocumentationResult?.datasetResult
+  );
+
+  if (successfulJobs.length === 0) return null;
+
   return successfulJobs.sort(
     (a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
   )[0];

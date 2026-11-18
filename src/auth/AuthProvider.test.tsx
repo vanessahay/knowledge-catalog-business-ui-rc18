@@ -71,6 +71,7 @@ vi.mock('../features/user/userSlice', () => ({
 // Mock projectsSlice
 vi.mock('../features/projects/projectsSlice', () => ({
   setIsLoaded: (payload: unknown) => mockSetIsLoaded(payload),
+  resetProjects: () => ({ type: 'projects/resetProjects' }),
 }));
 
 // Mock persistence
@@ -430,8 +431,25 @@ describe('AuthProvider', () => {
       expect(mockDispatch).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'user/setCredentials', payload: { token: null, user: null } })
       );
+      // resetProjects (not setIsLoaded) — the whole slice must be cleared,
+      // otherwise the previous user's `items` survive into the next session.
       expect(mockDispatch).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'projects/setIsLoaded', payload: { isloaded: false } })
+        expect.objectContaining({ type: 'projects/resetProjects' })
+      );
+      expect(mockDispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'glossaries/clearGlossaries' })
+      );
+      // BrowseByAnnotation skips rebuilding its list while
+      // browseDynamicAnnotationsData is populated, so leaving the resources slice
+      // alone showed the previous user's aspect list after re-login.
+      expect(mockDispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'resources/resetBrowseUIState' })
+      );
+      expect(mockDispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'resources/clearAspectBrowseCache' })
+      );
+      expect(mockDispatch).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'dataproducts/resetDataProductsUIState' })
       );
       expect(mockClearUserState).toHaveBeenCalled();
       expect(mockClearPersistedState).toHaveBeenCalled();

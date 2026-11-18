@@ -151,7 +151,7 @@ export interface GlossaryItem {
 //     location: 'Global',
 //     lastModified: 1762351802, // Nov 5, 2025
 //     labels: ['sales', 'crm', 'critical'],
-//     contacts: ['rowansmith@google.com'],
+//     contacts: ['rowansmith@example.com'],
 //     children: [
 //       {
 //         id: 'term-gdpr-status',
@@ -160,7 +160,7 @@ export interface GlossaryItem {
 //         description: 'Current legal consent status for data processing.',
 //         lastModified: 1748784000, // June 1, 2025
 //         labels: ['legal', 'privacy'],
-//         contacts: ['dpo@google.com'],
+//         contacts: ['dpo@example.com'],
 //         longDescription: 'Indicates whether the user has explicitly consented to data processing as per EU regulations.',
 //         relations: []
 //       },
@@ -171,7 +171,7 @@ export interface GlossaryItem {
 //         description: 'Data related to customer classification.',
 //         lastModified: 1746883200, // May 10, 2025
 //         labels: ['classification', 'marketing'],
-//         contacts: ['marketing-lead@google.com'],
+//         contacts: ['marketing-lead@example.com'],
 //         children: [
 //            {
 //                 id: 'term-customer-identity',
@@ -180,7 +180,7 @@ export interface GlossaryItem {
 //                 description: 'Unique identifier assigned to a customer entity.',
 //                 lastModified: 1746624000, // May 7, 2025
 //                 labels: ['pii', 'primary-key'],
-//                 contacts: ['arch-team@google.com'],
+//                 contacts: ['arch-team@example.com'],
 //                 longDescription: 'The primary key used across all sales systems to identify a unique buying entity.',
 //                 relations: [],
 //                 entryType: 'projects/655216118709/locations/global/entryTypes/generic',
@@ -196,7 +196,7 @@ export interface GlossaryItem {
 //         description: 'Log of all customer touchpoints.',
 //         lastModified: 1747056000, // May 12, 2025
 //         labels: ['high-volume', 'logs'],
-//         contacts: ['data-eng@google.com'],
+//         contacts: ['data-eng@example.com'],
 //         children: [
 //             {
 //                 id: 'term-last-login',
@@ -205,7 +205,7 @@ export interface GlossaryItem {
 //                 description: 'Timestamp of the most recent successful login.',
 //                 lastModified: 1746624000, // May 7, 2025
 //                 labels: ['security', 'audit'],
-//                 contacts: ['security-ops@google.com'],
+//                 contacts: ['security-ops@example.com'],
 //                 longDescription: 'Detailed documentation regarding the login timestamp logic. This field captures the UTC timestamp of the last successful authentication event.',
 //                 relations: [
 //                     {
@@ -235,7 +235,7 @@ export interface GlossaryItem {
 //     location: 'North America',
 //     lastModified: 1757510400, // Sep 10, 2025
 //     labels: ['inventory', 'retail'],
-//     contacts: ['supply-chain@google.com'],
+//     contacts: ['supply-chain@example.com'],
 //     children: [
 //         {
 //             id: 'cat-inventory',
@@ -244,7 +244,7 @@ export interface GlossaryItem {
 //             description: 'Tracking stock levels and warehouse locations.',
 //             lastModified: 1757596800, // Sep 11, 2025
 //             labels: ['logistics'],
-//             contacts: ['warehouse-ops@google.com'],
+//             contacts: ['warehouse-ops@example.com'],
 //             children: [
 //                 {
 //                     id: 'term-sku',
@@ -253,7 +253,7 @@ export interface GlossaryItem {
 //                     description: 'Unique alphanumeric code for product tracking.',
 //                     lastModified: 1757596800, // Sep 11, 2025
 //                     labels: ['core-data'],
-//                     contacts: ['catalog-mgr@google.com'],
+//                     contacts: ['catalog-mgr@example.com'],
 //                     longDescription: 'The primary identifier for inventory management. Every variation of size and color has a unique SKU.',
 //                     relations: []
 //                 }
@@ -274,7 +274,7 @@ export interface GlossaryItem {
 //     location: 'London, UK',
 //     lastModified: 1760966400, // Oct 20, 2025
 //     labels: ['finance', 'regulatory', 'global'],
-//     contacts: ['chief-controller@google.com'],
+//     contacts: ['chief-controller@example.com'],
 //     longDescription: `
 //       <p>This glossary serves as the definitive reference for all financial terminology used within the Global Finance Division. It encompasses standards for financial reporting, budgeting, forecasting, and internal auditing.</p>
 
@@ -301,7 +301,7 @@ export interface GlossaryItem {
 //             description: 'Generally Accepted Accounting Principles for US reporting.',
 //             lastModified: 1761052800, // Oct 21, 2025
 //             labels: ['compliance', 'usa'],
-//             contacts: ['compliance-officer@google.com'],
+//             contacts: ['compliance-officer@example.com'],
 //             children: [
 //                 {
 //                     id: 'term-revenue-recognition',
@@ -310,7 +310,7 @@ export interface GlossaryItem {
 //                     description: 'Principles for recognizing revenue from contracts with customers.',
 //                     lastModified: 1761052800, // Oct 21, 2025
 //                     labels: ['accounting', 'critical'],
-//                     contacts: ['rev-rec-team@google.com'],
+//                     contacts: ['rev-rec-team@example.com'],
 //                     longDescription: 'Detailed implementation guide for ASC 606, including the five-step model for revenue recognition.',
 //                     relations: []
 //                 }
@@ -331,7 +331,7 @@ export interface GlossaryItem {
 //     location: 'Distributed',
 //     lastModified: 1761139200, // Oct 22, 2025
 //     labels: ['cloud', 'devops', 'tech'],
-//     contacts: ['sre-leads@google.com'],
+//     contacts: ['sre-leads@example.com'],
 //     longDescription: `
 //       <p>This glossary provides a unified vocabulary for the Cloud Engineering and DevOps teams.</p>
 
@@ -358,7 +358,7 @@ export interface GlossaryItem {
 //             description: 'Standard K8s objects used in production clusters.',
 //             lastModified: 1761139200, // Oct 22, 2025
 //             labels: ['k8s', 'containers'],
-//             contacts: ['platform-team@google.com'],
+//             contacts: ['platform-team@example.com'],
 //             children: [
 //                 {
 //                     id: 'term-deployment',
@@ -367,7 +367,7 @@ export interface GlossaryItem {
 //                     description: 'A higher-level abstraction that manages the replication of Pods.',
 //                     lastModified: 1761225600, // Oct 23, 2025
 //                     labels: ['workload', 'stateless'],
-//                     contacts: ['devops@google.com'],
+//                     contacts: ['devops@example.com'],
 //                     longDescription: 'Provides declarative updates for Pods and ReplicaSets.',
 //                     relations: []
 //                 }
@@ -388,7 +388,7 @@ export interface GlossaryItem {
 //     location: 'New York, NY',
 //     lastModified: 1764547200, // Dec 01, 2025
 //     labels: ['architecture', 'governance', 'strategy', 'policy', 'standards'],
-//     contacts: ['cdo-office@google.com', 'data-stewards@google.com'],
+//     contacts: ['cdo-office@example.com', 'data-stewards@example.com'],
 //     longDescription: `
 //       <p><strong>Executive Summary:</strong> The Enterprise Data Architecture (EDA) serves as the backbone of our digital transformation strategy. It provides a holistic view of data flows, storage mechanisms, and consumption patterns across the global enterprise.</p>
 
@@ -432,7 +432,7 @@ export interface GlossaryItem {
 //         description: 'Metrics for assessing the health of data assets.',
 //         lastModified: 1764633600, // Dec 02, 2025
 //         labels: ['quality', 'metrics'],
-//         contacts: ['dq-team@google.com'],
+//         contacts: ['dq-team@example.com'],
 //         children: [
 //           {
 //             id: 'term-completeness',
@@ -442,7 +442,7 @@ export interface GlossaryItem {
 //             longDescription: 'Completeness determines whether all necessary data is present. A dataset is considered complete if there are no missing values for critical fields. For example, a customer record must have a valid email address and phone number to be considered complete for marketing purposes.',
 //             lastModified: 1764720000, // Dec 03, 2025
 //             labels: ['dq-metric'],
-//             contacts: ['dq-analyst@google.com'],
+//             contacts: ['dq-analyst@example.com'],
 //             relations: []
 //           }
 //         ]
@@ -463,7 +463,7 @@ export interface GlossaryItem {
 //     location: 'Global',
 //     lastModified: 1765000000, // Future date
 //     labels: ['hr', 'personnel', 'sensitive'],
-//     contacts: ['hr-ops@google.com'],
+//     contacts: ['hr-ops@example.com'],
 //     children: [
 //       {
 //         id: 'cat-talent-acquisition',
@@ -472,7 +472,7 @@ export interface GlossaryItem {
 //         description: '',
 //         lastModified: 1765100000,
 //         labels: ['recruiting', 'hiring'],
-//         contacts: ['talent-lead@google.com'],
+//         contacts: ['talent-lead@example.com'],
 //         children: [
 //           // 1. NESTED CATEGORY (Category inside Category)
 //           {
@@ -482,7 +482,7 @@ export interface GlossaryItem {
 //             description: 'Platforms and methods for finding candidates.',
 //             lastModified: 1765200000,
 //             labels: ['linkedin', 'referrals'],
-//             contacts: ['sourcing-mgr@google.com'],
+//             contacts: ['sourcing-mgr@example.com'],
 //             children: [
 //                 {
 //                     id: 'term-referral-bonus',
@@ -503,7 +503,7 @@ export interface GlossaryItem {
 //             longDescription: 'A key efficiency metric for the recruiting team. Calculated as: Date of Offer Acceptance - Date of Application.',
 //             lastModified: 1765300000,
 //             labels: ['kpi', 'recruiting-metrics'],
-//             contacts: ['hr-analytics@google.com'],
+//             contacts: ['hr-analytics@example.com'],
 //             relations: [
 //                {
 //                    id: 'term-offer-acceptance',
@@ -539,7 +539,7 @@ export interface GlossaryItem {
 //     location: 'Remote',
 //     lastModified: 1770000000,
 //     labels: ['security', 'soc', 'alerting'],
-//     contacts: ['ciso@google.com'],
+//     contacts: ['ciso@example.com'],
 //     children: [
 //       {
 //         id: 'cat-incident-response',
@@ -550,10 +550,10 @@ export interface GlossaryItem {
 //         labels: ['ir', 'breach'],
 //         // 4 CONTACTS HERE TO TEST OVERFLOW
 //         contacts: [
-//             'ir-lead@google.com',
-//             'forensics@google.com',
-//             'legal-counsel@google.com',
-//             'pr-comms@google.com'
+//             'ir-lead@example.com',
+//             'forensics@example.com',
+//             'legal-counsel@example.com',
+//             'pr-comms@example.com'
 //         ],
 //         children: [
 //             {
@@ -583,7 +583,7 @@ export interface GlossaryItem {
 //     location: 'Washington DC',
 //     lastModified: 1780000000,
 //     labels: ['legal', 'contracts', 'ip'],
-//     contacts: ['general-counsel@google.com'],
+//     contacts: ['general-counsel@example.com'],
 //     children: [
 //         {
 //             id: 'cat-contracts',
@@ -592,7 +592,7 @@ export interface GlossaryItem {
 //             description: 'Terms related to MSA, SOW, and NDA documents.',
 //             lastModified: 1780100000,
 //             labels: ['contracts'],
-//             contacts: ['contract-mgr@google.com'],
+//             contacts: ['contract-mgr@example.com'],
 //             children: []
 //         },
 //         {
@@ -602,7 +602,7 @@ export interface GlossaryItem {
 //             // description: 'Patents, trademarks, and copyright definitions.',
 //             lastModified: 1780200000,
 //             labels: ['ip', 'patents'],
-//             contacts: ['ip-lawyer@google.com'],
+//             contacts: ['ip-lawyer@example.com'],
 //             children: []
 //         },
 //         {
@@ -612,7 +612,7 @@ export interface GlossaryItem {
 //             description: 'Court case classifications and discovery terms.',
 //             lastModified: 1780300000,
 //             labels: ['court', 'lawsuits'],
-//             contacts: ['litigation-team@google.com'],
+//             contacts: ['litigation-team@example.com'],
 //             children: []
 //         },
 //         {
@@ -622,7 +622,7 @@ export interface GlossaryItem {
 //             description: 'ISO, SOC2, and internal audit terminology.',
 //             lastModified: 1780400000,
 //             labels: ['audit', 'iso'],
-//             contacts: ['internal-audit@google.com'],
+//             contacts: ['internal-audit@example.com'],
 //             children: []
 //         }
 //     ]
@@ -641,7 +641,7 @@ export interface GlossaryItem {
 //     location: 'Global',
 //     lastModified: 1790000000,
 //     labels: ['pmo', 'agile', 'delivery'],
-//     contacts: ['pmo-director@google.com'],
+//     contacts: ['pmo-director@example.com'],
 //     children: [
 //         {
 //             id: 'term-agile',
@@ -651,7 +651,7 @@ export interface GlossaryItem {
 //             longDescription: 'Agile focuses on delivering value to customers faster and with fewer headaches by working in small increments.',
 //             lastModified: 1790100000,
 //             labels: ['methodology'],
-//             contacts: ['scrum-master@google.com'],
+//             contacts: ['scrum-master@example.com'],
 //             relations: [
 //                 // 1. Synonym - Internal link (Scrum is defined below)
 //                 {

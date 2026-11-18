@@ -12,7 +12,7 @@ import {
 } from "@mui/material";
 import NothingImage from "../../assets/images/nothing-image.png";
 
-import { ArrowBack, KeyboardArrowUp, KeyboardArrowDown, Close, FormatListBulleted, DashboardOutlined, CategoryOutlined, ArticleOutlined, Inventory2Outlined } from "@mui/icons-material";
+import { ArrowBack, KeyboardArrowUp, KeyboardArrowDown, Close, FormatListBulleted, DashboardOutlined, CategoryOutlined, ArticleOutlined, Inventory2Outlined, LinkOutlined } from "@mui/icons-material";
 import { type GlossaryItem, type FilterChip, type FilterFieldType, FILTER_FIELD_LABELS } from "./GlossaryDataType";
 import PreviewAnnotation from "../Annotation/PreviewAnnotation";
 import AnnotationFilter from "../Annotation/AnnotationFilter";
@@ -32,9 +32,9 @@ import {
   setGlossaryExpandedIds,
   setGlossaryTabValue,
 } from "../../features/glossaries/glossariesSlice";
-import { getProjects } from "../../features/projects/projectsSlice";
 import { setSideNavOpen } from "../../features/search/searchSlice";
 import { useAuth } from "../../auth/AuthProvider";
+import { useAppBootstrapStatus } from "../../hooks/useAppBootstrap";
 import ShimmerLoader from "../Shimmer/ShimmerLoader";
 import GlossariesPageSkeleton from "./GlossariesPageSkeleton";
 import {
@@ -56,12 +56,14 @@ import GlossariesLinkedAssets from "./GlossariesLinkedAssets";
 import FilterBar, { FilterBarChips } from "../Common/FilterBar";
 import type { ActiveFilter } from "../Common/FilterBar";
 import DetailPageOverview from "../DetailPageOverview/DetailPageOverview";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 /**
  * Transforms a GlossaryItem into the entry format expected by DetailPageOverview.
  * Maps glossary-specific fields to the standard entry structure.
+ * @param parentDisplayName - display name of the item's parent (Glossary/Category), if any.
  */
-const transformGlossaryToEntry = (item: GlossaryItem) => {
+const transformGlossaryToEntry = (item: GlossaryItem, parentDisplayName?: string) => {
   // Build labels object from array (e.g., ["key:value"] -> { key: "value" })
   const labelsObject = (item.labels || []).reduce((acc, label) => {
     const [key, ...valueParts] = label.split(':');
@@ -83,7 +85,8 @@ const transformGlossaryToEntry = (item: GlossaryItem) => {
   return {
     name: item.id,
     entryType: `glossary/${item.type}`,
-    fullyQualifiedName: item.id,
+    fullyQualifiedName: '',
+    parentEntry: parentDisplayName || '',
     createTime: null,
     updateTime: item.lastModified ? { seconds: item.lastModified } : null,
     entrySource: {
@@ -177,6 +180,10 @@ const activeFilterToChip = (filter: ActiveFilter): FilterChip => ({
 const Glossaries = () => {
   const dispatch = useDispatch<AppDispatch>();
   const { user } = useAuth();
+  // fetchGlossaries only reads appConfig (projectsRestricted /
+  // configuredProjectIds) — it never touches the project list, so it shouldn't
+  // wait on /get-projects.
+  const { isAppConfigReady } = useAppBootstrapStatus();
 
   const {
     glossaryItems,
@@ -186,7 +193,6 @@ const Glossaries = () => {
     activeFilters,
     accessDeniedItemId,
   } = useSelector((state: any) => state.glossaries);
-  const projectsLoaded = useSelector((state: any) => state.projects.isloaded);
 
   const reduxSelectedId = useSelector((state: any) => state.glossaries.selectedId) as string;
   const reduxExpandedIds = useSelector((state: any) => state.glossaries.expandedIds) as string[];
@@ -210,6 +216,17 @@ const Glossaries = () => {
     dispatch(setGlossaryTabValue(val));
   }, [dispatch]);
   const [glossaryFilterText, setGlossaryFilterText] = useState('');
+  const [copyLinkSuccess, setCopyLinkSuccess] = useState(false);
+  const urlEntryHandled = React.useRef(false);
+
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const resolveTabName = (index: number): string =>
+    (['overview', 'categories', 'terms', 'linked-assets', 'synonyms', 'aspects'] as const)[index] ?? 'overview';
+
+  const resolveTabIndex = (name: string): number =>
+    ({ overview: 0, categories: 1, terms: 2, 'linked-assets': 3, synonyms: 4, aspects: 5 } as Record<string, number>)[name] ?? 0;
 
   const handleFilterBarChange = useCallback((newFilters: ActiveFilter[]) => {
     const chips = newFilters.map(activeFilterToChip);
@@ -254,15 +271,25 @@ const Glossaries = () => {
   const [isAssetPreviewOpen, setIsAssetPreviewOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [sortBy, setSortBy] = useState<"name" | "lastModified">("lastModified");
-  const fetchedParentIds = React.useRef(new Set<string>(
-    glossaryItems
-      .filter((item: GlossaryItem) => item.children && item.children.length > 0)
-      .map((item: GlossaryItem) => item.id)
-  ));
+  // (fetchedParentIds removed: it existed only to de-duplicate the eager
+  // prefetch effect against handleNavigate. handleToggle's own
+  // `children.length === 0` guard is what prevents refetching now.)
   const manualSelectionId = React.useRef<string | null>(null);
   const wasSearching = React.useRef(false);
   const initialFilterExpansionSet = React.useRef(false);
   const [isSidebarLoading, setIsSidebarLoading] = useState(false);
+  // Nodes whose children are being fetched right now. Needed because an expanded
+  // node with no children is ambiguous - it is either still loading or genuinely
+  // empty - and only the first should show a skeleton.
+  const [loadingChildrenIds, setLoadingChildrenIds] = useState<Set<string>>(new Set());
+  const markChildrenLoading = useCallback((id: string, loading: boolean) => {
+    setLoadingChildrenIds((prev) => {
+      if (prev.has(id) === loading) return prev;
+      const next = new Set(prev);
+      if (loading) next.add(id); else next.delete(id);
+      return next;
+    });
+  }, []);
   const [isContentLoading, setIsContentLoading] = useState(false);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -276,26 +303,24 @@ const Glossaries = () => {
     return glossaryItems;
   }, [activeFilters, filteredTreeItems, glossaryItems]);
 
+  // Wait for appConfig (projectsRestricted/configuredProjectIds) to be
+  // bootstrapped before fetching: fetchGlossaries reads it at dispatch time
+  // to scope the query, so firing early on a cold deep-link/reload would
+  // silently skip the restricted-project filter.
   useEffect(() => {
-    if (!projectsLoaded && user?.token) {
-      dispatch(getProjects({ id_token: user?.token }));
-    }
-  }, [dispatch, projectsLoaded, user?.token]);
-
-  useEffect(() => {
-    if (glossaryItems.length === 0 && status === "idle" && user?.token) {
+    if (glossaryItems.length === 0 && status === "idle" && user?.token && isAppConfigReady) {
       dispatch(fetchGlossaries({ id_token: user?.token }));
     }
-  }, [dispatch, glossaryItems.length, status, user?.token]);
+  }, [dispatch, glossaryItems.length, status, user?.token, isAppConfigReady]);
 
   useEffect(() => {
-    if (displayGlossaries.length > 0 && !selectedId) {
+    if (displayGlossaries.length > 0 && !selectedId && !searchParams.get('entry')) {
       setSelectedId(displayGlossaries[0].id);
     }
   }, [displayGlossaries, selectedId]);
 
   useEffect(() => {
-    if (glossaryItems.length > 0 && !selectedId) {
+    if (glossaryItems.length > 0 && !selectedId && !searchParams.get('entry')) {
       const firstId = glossaryItems[0].id;
       setSelectedId(firstId);
       // Also fetch details for the first item immediately
@@ -303,8 +328,30 @@ const Glossaries = () => {
       dispatch(fetchGlossaryEntryDetails({ entryName: firstId, id_token: user?.token }))
         .unwrap()
         .finally(() => setIsContentLoading(false));
+      // ...and its children. This glossary is selected without anyone clicking it,
+      // so it never goes through handleToggle - without this its Categories and
+      // Terms tabs render empty on landing. Only this one glossary is warmed; the
+      // rest load on expand.
+      //
+      // Glossaries only: terms and categories have no children to list, and
+      // asking for them would leave the sidebar stuck in its loading state.
+      if (glossaryItems[0].type === "glossary" && !glossaryItems[0].children?.length) {
+        setIsSidebarLoading(true);
+        dispatch(fetchGlossaryChildren({ parentId: firstId, id_token: user?.token }))
+          .unwrap()
+          .catch(() => { /* surfaced by the tree itself; nothing to do here */ })
+          .finally(() => setIsSidebarLoading(false));
+      }
+      navigate(`/glossaries?entry=${encodeURIComponent(btoa(firstId))}`, { replace: true });
+      // We're establishing the selection ourselves (no incoming deep link to honor),
+      // so mark the deep-link bootstrap as handled now. Otherwise the bootstrap effect
+      // below sees a stale (not-yet-updated) searchParams on this same tick, bails out
+      // without ever flipping this ref, and — since its deps don't include searchParams —
+      // never gets another chance to. That leaves `!urlEntryHandled.current` permanently
+      // true, which pins the page's loading skeleton on for every future navigation.
+      urlEntryHandled.current = true;
     }
-  }, [glossaryItems, selectedId, dispatch, user?.token]);
+  }, [glossaryItems, selectedId, dispatch, user?.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset sidebar when navigating away from Glossaries
   useEffect(() => {
@@ -312,6 +359,34 @@ const Glossaries = () => {
       dispatch(setSideNavOpen(true));
     };
   }, [dispatch]);
+
+  // Bootstrap from URL ?entry= param (deep-link / page reload)
+  useEffect(() => {
+    const entryParam = searchParams.get('entry');
+    // Wait until the root glossaries have finished loading (status === 'succeeded' or items exist)
+    if (!entryParam || urlEntryHandled.current || !user?.token || glossaryItems.length === 0) return;
+    
+    urlEntryHandled.current = true;
+    try {
+      const decoded = atob(entryParam);
+      const tabParam = searchParams.get('tab');
+      handleNavigate(decoded).then(() => {
+        const tabIndex = tabParam ? resolveTabIndex(tabParam) : 0;
+        if (tabIndex !== 0) setTabValue(tabIndex);
+      });
+    } catch {
+      // malformed base64 — ignore, fall through to default first-item selection
+    }
+  }, [user?.token, glossaryItems.length]); // Added glossaryItems.length to dependencies
+
+  const handleCopyLink = () => {
+    if (!selectedItem?.id) return;
+    const url = `${window.location.origin}/glossaries?entry=${encodeURIComponent(btoa(selectedItem.id))}&tab=${resolveTabName(tabValue)}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopyLinkSuccess(true);
+      setTimeout(() => setCopyLinkSuccess(false), 2000);
+    });
+  };
 
   // --- Sort Handlers ---
   const handleSortDirectionToggle = () => {
@@ -353,8 +428,15 @@ const Glossaries = () => {
 
   const selectedItem = useMemo(() => {
     if (!selectedId) return null;
-    return findItem(glossaryItems, selectedId);
-  }, [selectedId, glossaryItems]);
+    // Fall back to the filtered tree (displayGlossaries) when the id isn't in
+    // glossaryItems. A search-only match that the user has no access to never
+    // gets pushed into glossaryItems (its details fetch 403s), so without this
+    // fallback selectedItem stays null and the content pane renders the empty
+    // "Select an item" state instead of the Permission Denied card driven by
+    // accessDeniedItemId. (When no filter is active, displayGlossaries ===
+    // glossaryItems, so this is a no-op.)
+    return findItem(glossaryItems, selectedId) || findItem(displayGlossaries, selectedId);
+  }, [selectedId, glossaryItems, displayGlossaries]);
 
   // Reset description expanded state when selected item changes
   useEffect(() => {
@@ -366,6 +448,9 @@ const Glossaries = () => {
     if (!selectedId) return [];
     return getBreadcrumbs(glossaryItems, selectedId) || []; // Use glossaryItems
   }, [selectedId, glossaryItems]);
+
+  // Direct parent of selectedItem (the item just before it in the breadcrumb chain)
+  const parentItem = breadcrumbs.length > 1 ? breadcrumbs[breadcrumbs.length - 2] : null;
 
   const categories =
     selectedItem?.children?.filter((c) => c.type === "category") || [];
@@ -382,6 +467,12 @@ const Glossaries = () => {
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
     setContentSearchTerm("");
+    if (selectedId) {
+      navigate(
+        `/glossaries?entry=${encodeURIComponent(btoa(selectedId))}&tab=${resolveTabName(newValue)}`,
+        { replace: true }
+      );
+    }
   };
 
   const handleToggle = (id: string) => {
@@ -401,16 +492,36 @@ const Glossaries = () => {
             newExpanded.delete(g.id);
           }
         });
+      } else if (!isRootGlossary && activeFilters.length === 0) {
+        // Collapse sibling categories under the same parent (accordion behavior)
+        const chain = getBreadcrumbs(displayGlossaries, id);
+        const parent = chain && chain.length >= 2 ? chain[chain.length - 2] : null;
+        if (parent?.children) {
+          parent.children.forEach((sibling) => {
+            if (sibling.id !== id && newExpanded.has(sibling.id)) {
+              newExpanded.delete(sibling.id);
+              if (sibling.children) {
+                collectAllIds(sibling.children).forEach((descId) =>
+                  newExpanded.delete(descId)
+                );
+              }
+            }
+          });
+        }
       }
 
       // If expanding and no children, fetch them
       if (item && (!item.children || item.children.length === 0)) {
+        markChildrenLoading(id, true);
         dispatch(
           fetchGlossaryChildren({
             parentId: id,
             id_token: user?.token,
           })
-        );
+        )
+          .unwrap()
+          .catch(() => { /* the row simply stays empty; nothing extra to show */ })
+          .finally(() => markChildrenLoading(id, false));
       }
       newExpanded.add(id);
     } else {
@@ -426,6 +537,9 @@ const Glossaries = () => {
   };
 
   const handleNavigate = async (rawTargetId: string) => {
+    // START CONTENT LOADING IMMEDIATELY
+    setIsContentLoading(true); 
+
     // 0. Normalize ID to ensure it matches the Sidebar Tree format (Resource Name)
     const targetId = normalizeId(rawTargetId);
 
@@ -434,10 +548,13 @@ const Glossaries = () => {
 
     // 2. If not found, it might be in a collapsed glossary we haven't fetched yet
     if (!targetItem) {
-      const parentGlossaryId = extractGlossaryId(targetId);
+      // Use regex to safely guarantee we extract the Root Glossary ID
+      const match = targetId.match(/(projects\/[^/]+\/locations\/[^/]+\/glossaries\/[^/]+)/);
+      const parentGlossaryId = match ? match[1] : extractGlossaryId(targetId);
 
       if (parentGlossaryId) {
         setIsSidebarLoading(true);
+        markChildrenLoading(parentGlossaryId, true);
         try {
           // Fetch the children of the parent glossary
           await dispatch(
@@ -454,6 +571,7 @@ const Glossaries = () => {
           console.error("Failed to load parent glossary children", error);
         } finally {
           setIsSidebarLoading(false);
+          markChildrenLoading(parentGlossaryId, false);
         }
       }
     }
@@ -462,10 +580,16 @@ const Glossaries = () => {
     setSelectedId(targetId);
     setTabValue(0);
     setContentSearchTerm("");
+    navigate(`/glossaries?entry=${encodeURIComponent(btoa(targetId))}`, { replace: true });
 
     setIsContentLoading(true);
 
-    // Fetch entry details
+    // Fetch entry details, then relationships sequentially.
+    // .catch() comes BEFORE .then() intentionally: it swallows any rejection from
+    // fetchGlossaryEntryDetails so that .then() always runs — ensuring
+    // fetchTermRelationships is dispatched even when the detail fetch fails.
+    // This prevents relations:undefined from persisting for terms already in the
+    // tree (added by fetchGlossaryChildren) when fetchGlossaryEntryDetails rejects.
     dispatch(
       fetchGlossaryEntryDetails({
         entryName: targetId,
@@ -479,54 +603,35 @@ const Glossaries = () => {
           targetId,
           err
         );
+        // Swallowing here converts the rejected chain to resolved so .then() fires.
+      })
+      .then(() => {
+        // Always dispatched after fetchGlossaryEntryDetails settles (success or failure).
+        // Term is guaranteed to be in glossaryItems by this point (updated or pushed).
+        if (targetId.includes("/terms/")) {
+          dispatch(
+            fetchTermRelationships({
+              termId: targetId,
+              id_token: user?.token,
+            })
+          );
+        }
       })
       .finally(() => {
         setIsContentLoading(false);
       });
-
-    // If it's a TERM, fetch relationships
-    if (targetId.includes("/terms/")) {
-      dispatch(
-        fetchTermRelationships({
-          termId: targetId,
-          id_token: user?.token,
-        })
-      );
-    }
   };
 
 
-  useEffect(() => {
-    if (glossaryItems.length > 0 && user?.token) {
-      glossaryItems.forEach((item: GlossaryItem, index: number) => {
-        // Only target top-level Glossaries
-        if (item.type === "glossary") {
-          // Check if we haven't fetched this one yet
-          if (!fetchedParentIds.current.has(item.id)) {
-            // Mark as fetched immediately to prevent re-entry
-            fetchedParentIds.current.add(item.id);
-
-            // If children are empty, fetch them
-            if (!item.children || item.children.length === 0) {
-              // Only trigger loading state for the first item to control sidebar shimmer
-              if (index === 0) setIsSidebarLoading(true);
-
-              dispatch(
-                fetchGlossaryChildren({
-                  parentId: item.id,
-                  id_token: user?.token,
-                })
-              )
-                .unwrap() // Unwrap allows us to chain .finally/then on the thunk result
-                .finally(() => {
-                  if (index === 0) setIsSidebarLoading(false);
-                });
-            }
-          }
-        }
-      });
-    }
-  }, [glossaryItems, dispatch, user?.token]);
+  // Children are fetched lazily, on expand, by handleToggle. There used to be an
+  // effect here that eagerly fetched children for *every* root glossary on mount -
+  // one /glossary-children request per glossary, each fanning out to two upstream
+  // Dataplex calls. That was already heavy at the old 100-item cap and became far
+  // worse once the root query stopped truncating at 100.
+  //
+  // Nothing needs it: the expand chevron is driven by item.type, not by
+  // children.length (SidebarItem.tsx), and the sidebar does no client-side
+  // filtering over children.
 
   // --- Filter & Sort ---
   const filteredCategories = useMemo(() => {
@@ -626,14 +731,19 @@ const Glossaries = () => {
     }
   }, [selectedId, glossaryItems, activeFilters]);
 
+  // Deliberately does not wait on the first glossary's children. That clause
+  // ("roots are in but the first one's children aren't yet") only made sense while
+  // the eager prefetch above existed to satisfy it; with children fetched on expand
+  // instead, nothing would ever populate them here and the shimmer would never clear.
   const shouldShowSidebarShimmer =
     status === "loading" ||
     isSidebarLoading ||
     filterStatus === "loading" ||
-    (glossaryItems.length > 0 &&
-      glossaryItems[0].type === "glossary" &&
-      (!glossaryItems[0].children || glossaryItems[0].children.length === 0) &&
-      !fetchedParentIds.current.has(glossaryItems[0].id));
+    // Nothing has been requested yet - either still idle, or waiting on appConfig
+    // before the mount effect is allowed to dispatch. Without this the list falls
+    // through to its "No results found" branch for the whole /app-configs round
+    // trip, which claims we looked and found nothing before we have even asked.
+    (status === "idle" && glossaryItems.length === 0);
 
   return (
     <Box
@@ -728,6 +838,7 @@ const Glossaries = () => {
                 <SidebarItem
                   key={item.id}
                   item={item}
+                  loadingChildrenIds={loadingChildrenIds}
                   selectedId={selectedId}
                   expandedIds={expandedIds}
                   onSelect={(id) => {
@@ -766,7 +877,7 @@ const Glossaries = () => {
           transition: "margin-left 0.3s ease-in-out, width 0.3s ease-in-out",
         }}
       >
-        {(status === "loading" && !selectedItem) || isContentLoading ? (
+        {(status === "loading" && !selectedItem) || isContentLoading || !isAppConfigReady || (Boolean(searchParams.get('entry')) && !urlEntryHandled.current) ? (
           <GlossariesPageSkeleton />
         ) : (
         <>
@@ -835,6 +946,7 @@ const Glossaries = () => {
               flex: "none",
               order: 0,
               flexGrow: 0,
+              position: "relative",
             }}
           >
             {/* Breadcrumbs/Title Row */}
@@ -850,17 +962,23 @@ const Glossaries = () => {
               {(
                 <>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    {breadcrumbs.length > 1 && (
-                      <IconButton
-                        sx={{ p: '4px', width: '40px', height: '40px', borderRadius: '50%', color: '#1F1F1F', transition: 'background-color 0.2s', '&:hover': { backgroundColor: 'rgba(0, 0, 0, 0.04)' } }}
-                        onClick={() => {
-                          setSelectedId(breadcrumbs[breadcrumbs.length - 2].id);
+                    <IconButton
+                      sx={{ p: '4px', width: '40px', height: '40px', borderRadius: '50%', color: '#1F1F1F', transition: 'background-color 0.2s', '&:hover': { backgroundColor: 'rgba(0, 0, 0, 0.04)' } }}
+                      onClick={() => {
+                        if (breadcrumbs.length > 1) {
+                          // Child (category or term) — navigate to parent in hierarchy
+                          const newId = breadcrumbs[breadcrumbs.length - 2].id;
+                          setSelectedId(newId);
                           setTabValue(0);
-                        }}
-                      >
-                        <ArrowBack style={{ fontSize: "24px" }} />
-                      </IconButton>
-                    )}
+                          navigate(`/glossaries?entry=${encodeURIComponent(btoa(newId))}`, { replace: true });
+                        } else {
+                          // Top-level glossary — browser history back
+                          navigate(-1);
+                        }
+                      }}
+                    >
+                      <ArrowBack style={{ fontSize: "24px" }} />
+                    </IconButton>
                     <ThemedIconContainer iconColor={GLOSSARY_COLORS[selectedItem?.type || "term"]}>
                       {getIcon(selectedItem?.type || "term", "medium")}
                     </ThemedIconContainer>
@@ -883,6 +1001,19 @@ const Glossaries = () => {
                 </>
               )}
             </Box>
+
+            {/* Copy Link button — absolutely positioned top-right of the header card */}
+            <div style={{ position: "absolute", top: "24px", right: "24px", display: "flex", alignItems: "center", gap: "8px" }}>
+              <Tooltip title={copyLinkSuccess ? 'Link copied!' : 'Copy link'} placement="bottom">
+                <IconButton
+                  onClick={handleCopyLink}
+                  size="small"
+                  sx={{ border: '1px solid #DADCE0', borderRadius: '100px', padding: '8px 12px', color: '#022FCD', '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' } }}
+                >
+                  <LinkOutlined sx={{ fontSize: '20px' }} />
+                </IconButton>
+              </Tooltip>
+            </div>
 
             {/* Description Section */}
             {selectedItem && (
@@ -1059,7 +1190,7 @@ const Glossaries = () => {
                 }}
               >
                 <DetailPageOverview
-                  entry={transformGlossaryToEntry(selectedItem)}
+                  entry={transformGlossaryToEntry(selectedItem, parentItem?.displayName)}
                   css={{ width: "100%" }}
                   accessDenied={accessDeniedItemId === selectedId}
                 />
@@ -1148,14 +1279,13 @@ const Glossaries = () => {
                     </Box>
 
                     {/* Aspect List Component */}
-                    <Box sx={{ 
-                      flex: 1, 
-                      overflowY: "auto", 
+                    <Box sx={{
+                      flex: 1,
+                      overflowY: "auto",
                       minHeight: 0,
                       border: '1px solid #DADCE0',
                       borderRadius: '12px',
                       backgroundColor: '#FFFFFF',
-                      overflow: 'hidden',
                       marginTop: '12px'
                     }}>
                       <PreviewAnnotation

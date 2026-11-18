@@ -349,7 +349,7 @@ describe('SessionWarningModal', () => {
 
       if (capturedGoogleLoginCallbacks.onSuccess) {
         await capturedGoogleLoginCallbacks.onSuccess({
-          access_token: 'new-access-token',
+          access_token: 'new-access-token', // pragma: allowlist secret
         });
       }
 

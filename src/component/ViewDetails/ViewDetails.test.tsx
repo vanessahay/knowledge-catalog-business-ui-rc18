@@ -373,6 +373,18 @@ describe('ViewDetails', () => {
     aspects: {}
   };
 
+  const mockLookerEntry = {
+    name: 'projects/test/locations/us/entryGroups/@looker/entries/looker-model',
+    fullyQualifiedName: 'looker:instance.model',
+    entryType: 'projects/test/locations/global/entryTypes/looker-model',
+    entrySource: {
+      system: 'looker',
+      displayName: 'Test Looker Model',
+      resource: 'projects/test/locations/us/lookerInstances/test/models/model1'
+    },
+    aspects: {}
+  };
+
   const mockOtherEntry = {
     name: 'project/other/resource',
     fullyQualifiedName: 'project:other.resource',
@@ -471,7 +483,7 @@ describe('ViewDetails', () => {
       });
 
       expect(mockDispatch).toHaveBeenCalled();
-      expect(mockNavigate).toHaveBeenCalledWith(-1);
+      expect(mockNavigate).toHaveBeenCalledWith('/home');
     });
 
     it('pops from entry history when history exists', async () => {
@@ -683,6 +695,61 @@ describe('ViewDetails', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('entry-list')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Looker Entry Type', () => {
+    it('renders Entry List, Lineage and Glossary Terms tabs for Looker entries', async () => {
+      renderViewDetails(mockLookerEntry);
+
+      await waitFor(() => {
+        expect(screen.getByText('Overview')).toBeInTheDocument();
+        expect(screen.getByText('Entry List')).toBeInTheDocument();
+        expect(screen.getByText('Aspects')).toBeInTheDocument();
+        expect(screen.getByText('Lineage')).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Glossary Terms' })).toBeInTheDocument();
+      });
+
+      expect(screen.queryByRole('tab', { name: 'Data Profile' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: 'Data Quality' })).not.toBeInTheDocument();
+    });
+
+    it('renders entry list content for Looker entries', async () => {
+      renderViewDetails(mockLookerEntry);
+
+      await waitFor(() => {
+        fireEvent.click(screen.getByText('Entry List'));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('entry-list')).toBeInTheDocument();
+      });
+    });
+
+    it('renders lineage content for Looker entries', async () => {
+      renderViewDetails(mockLookerEntry);
+
+      await waitFor(() => {
+        fireEvent.click(screen.getByText('Lineage'));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('tabpanel-3')).toBeInTheDocument();
+        expect(screen.getByTestId('lineage')).toBeInTheDocument();
+      });
+    });
+
+    it('renders aspects content for Looker entries', async () => {
+      renderViewDetails(mockLookerEntry);
+
+      await waitFor(() => {
+        fireEvent.click(screen.getByText('Aspects'));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId('tabpanel-2')).toBeInTheDocument();
+        expect(screen.getByTestId('annotation-filter')).toBeInTheDocument();
       });
     });
   });
@@ -1147,6 +1214,87 @@ describe('ViewDetails', () => {
         expect(screen.getByText('0 terms')).toBeInTheDocument();
       });
     });
+
+    describe('fetchEntryLinks trigger', () => {
+      // Regression coverage for the bug where returning to a previously-viewed
+      // resource (via Back/popFromHistory) left the Glossary Terms tab empty
+      // forever: the fetch must be gated on entryLinksStatus, which is reset to
+      // 'idle' by entry-change reducers, not on a local "already fetched" cache
+      // that doesn't know the displayed entry changed and changed back.
+      it('dispatches fetchEntryLinks for a non-glossary entry when entryLinksStatus is idle', async () => {
+        const store = createMockStore(mockEntry, 'succeeded', mockSampleData, 'succeeded', [], [], 'idle');
+        render(
+          <Provider store={store}>
+            <BrowserRouter>
+              <AuthContext.Provider value={mockAuthContextValue}>
+                <ViewDetails />
+              </AuthContext.Provider>
+            </BrowserRouter>
+          </Provider>
+        );
+
+        await waitFor(() => {
+          expect(mockDispatch).toHaveBeenCalledWith({ type: 'entry/fetchEntryLinks' });
+        });
+      });
+
+      it('does not dispatch fetchEntryLinks when entryLinksStatus is already succeeded', async () => {
+        const store = createMockStore(mockEntry, 'succeeded', mockSampleData, 'succeeded', [], [], 'succeeded');
+        render(
+          <Provider store={store}>
+            <BrowserRouter>
+              <AuthContext.Provider value={mockAuthContextValue}>
+                <ViewDetails />
+              </AuthContext.Provider>
+            </BrowserRouter>
+          </Provider>
+        );
+
+        await waitFor(() => {
+          expect(screen.getByRole('tab', { name: 'Glossary Terms' })).toBeInTheDocument();
+        });
+
+        expect(mockDispatch).not.toHaveBeenCalledWith({ type: 'entry/fetchEntryLinks' });
+      });
+
+      it('does not dispatch fetchEntryLinks when entryLinksStatus is already loading', async () => {
+        const store = createMockStore(mockEntry, 'succeeded', mockSampleData, 'succeeded', [], [], 'loading');
+        render(
+          <Provider store={store}>
+            <BrowserRouter>
+              <AuthContext.Provider value={mockAuthContextValue}>
+                <ViewDetails />
+              </AuthContext.Provider>
+            </BrowserRouter>
+          </Provider>
+        );
+
+        await waitFor(() => {
+          expect(screen.getByRole('tab', { name: 'Glossary Terms' })).toBeInTheDocument();
+        });
+
+        expect(mockDispatch).not.toHaveBeenCalledWith({ type: 'entry/fetchEntryLinks' });
+      });
+
+      it('does not dispatch fetchEntryLinks for a glossary-like entry even when entryLinksStatus is idle', async () => {
+        const store = createMockStore(mockGlossaryEntry, 'succeeded', mockSampleData, 'succeeded', [], [], 'idle');
+        render(
+          <Provider store={store}>
+            <BrowserRouter>
+              <AuthContext.Provider value={mockAuthContextValue}>
+                <ViewDetails />
+              </AuthContext.Provider>
+            </BrowserRouter>
+          </Provider>
+        );
+
+        await waitFor(() => {
+          expect(screen.getByText('Overview')).toBeInTheDocument();
+        });
+
+        expect(mockDispatch).not.toHaveBeenCalledWith({ type: 'entry/fetchEntryLinks' });
+      });
+    });
   });
 
   describe('Asset Preview Panel', () => {
@@ -1410,7 +1558,7 @@ describe('ViewDetails', () => {
         fireEvent.click(backButton);
       });
 
-      expect(mockNavigate).toHaveBeenCalledWith(-1);
+      expect(mockNavigate).toHaveBeenCalledWith('/home');
     });
   });
 
@@ -1598,6 +1746,47 @@ describe('ViewDetails', () => {
 
       // No description section should be shown
       expect(screen.queryByText('Show more')).not.toBeInTheDocument();
+    });
+
+    it('does not show "Show more" for a short description padded with trailing whitespace past the threshold', async () => {
+      // Regression test: the button used to be gated on the raw, untrimmed
+      // description length. A description whose visible text is well under
+      // the 200-char threshold but padded with trailing whitespace/newlines
+      // past 200 raw characters must NOT show the button.
+      const shortVisibleText = 'A short description.'; // 21 visible chars
+      const paddedDescription = shortVisibleText + '\n'.repeat(200);
+      const entryWithPaddedDescription = {
+        ...mockEntry,
+        entrySource: {
+          ...mockEntry.entrySource,
+          description: paddedDescription
+        }
+      };
+
+      renderViewDetails(entryWithPaddedDescription);
+
+      await waitFor(() => {
+        expect(screen.getByText(shortVisibleText)).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText('Show more')).not.toBeInTheDocument();
+    });
+
+    it('still shows "Show more" for a genuinely long description', async () => {
+      const longDescription = 'A'.repeat(250);
+      const entryWithLongDescription = {
+        ...mockEntry,
+        entrySource: {
+          ...mockEntry.entrySource,
+          description: longDescription
+        }
+      };
+
+      renderViewDetails(entryWithLongDescription);
+
+      await waitFor(() => {
+        expect(screen.getByText('Show more')).toBeInTheDocument();
+      });
     });
   });
 

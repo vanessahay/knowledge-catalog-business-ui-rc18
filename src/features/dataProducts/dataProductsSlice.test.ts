@@ -8,6 +8,7 @@ import dataProductsReducer, {
   dataproductsSlice,
 } from "./dataProductsSlice";
 import userReducer from "../user/userSlice";
+import projectsReducer from "../projects/projectsSlice";
 
 // ==========================================================================
 // Mock axios
@@ -16,6 +17,11 @@ import userReducer from "../user/userSlice";
 vi.mock("axios", () => ({
   default: {
     get: vi.fn(),
+    // fetchDataProductsList also calls axios.post (SEARCH_ENTRIES) to merge in
+    // any data products found only via search. Default to "no search results"
+    // so existing tests that only stub axios.get keep seeing exactly their
+    // mocked dataProducts list; tests exercising the merge override this.
+    post: vi.fn().mockResolvedValue({ status: 200, data: { results: [] } }),
     defaults: {
       headers: {
         common: {},
@@ -73,28 +79,38 @@ const mockDataProductAssets = [
   },
 ];
 
+// Project identity mapping now comes from the projects slice (/get-projects),
+// not from appConfig. appConfig is still used for scoping-only fields.
+const mockProjectsList = [
+  { projectId: "test-project", name: "projects/123456789" },
+  { projectId: "another-project", name: "projects/987654321" },
+];
+
 const mockSessionData = {
-  appConfig: {
-    projects: [
-      { projectId: "test-project", name: "projects/123456789" },
-      { projectId: "another-project", name: "projects/987654321" },
-    ],
-  },
+  appConfig: {},
 };
 
 // ==========================================================================
 // Helper Functions
 // ==========================================================================
 
-const createTestStore = (userData: any = null) => {
+const createTestStore = (userData: any = null, projectsItems: any[] = mockProjectsList) => {
   return configureStore({
     reducer: {
       dataproducts: dataProductsReducer,
       user: userReducer,
+      projects: projectsReducer,
     },
-    preloadedState: userData ? {
+    preloadedState: {
       user: { token: null, userData, mode: 'light' as const },
-    } : undefined,
+      projects: {
+        items: projectsItems,
+        status: 'succeeded' as const,
+        error: null,
+        isloaded: true,
+        epoch: 0,
+      },
+    },
   });
 };
 
@@ -105,6 +121,10 @@ const createTestStore = (userData: any = null) => {
 describe("dataProductsSlice", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // vi.restoreAllMocks() in afterEach wipes vi.fn() implementations (there's
+    // no "original" to restore to for a plain mock), so re-establish the
+    // default "no search results" stub for every test.
+    vi.mocked(axios.post).mockResolvedValue({ status: 200, data: { results: [] } });
   });
 
   afterEach(() => {
@@ -245,6 +265,241 @@ describe("dataProductsSlice", () => {
       });
     });
 
+    describe("Search results merge (de-duplication)", () => {
+      // The primary dataProducts.list API returns resource names in
+      // project-number form (the GCP canonical form), while the search
+      // index's entrySource.resource - after replaceProjectNumberWithProjectId
+      // - is rewritten to project-id form for display. A product present in
+      // both sources must be recognized as the same product regardless of
+      // that format difference, or it gets added twice.
+      const numberFormProduct = {
+        name: "projects/123456789/locations/us-central1/dataProducts/product-1",
+        displayName: "Product 1",
+        description: "Test product 1",
+      };
+
+      const searchEntryForSameProduct = {
+        dataplexEntry: {
+          createTime: { seconds: "1700000000" },
+          updateTime: { seconds: "1700000100" },
+          entrySource: {
+            // Raw search resource arrives in project-number form too.
+            resource: "projects/123456789/locations/us-central1/dataProducts/product-1",
+            displayName: "Product 1",
+            description: "Test product 1",
+          },
+        },
+      };
+
+      it("does not duplicate a product already in the primary list, even when project id/number formats differ", async () => {
+        vi.mocked(axios.get).mockResolvedValueOnce({
+          status: 200,
+          data: { dataProducts: [numberFormProduct] },
+        });
+        vi.mocked(axios.post).mockResolvedValueOnce({
+          status: 200,
+          data: { results: [searchEntryForSameProduct] },
+        });
+
+        const store = createTestStore(mockSessionData);
+        await store.dispatch(
+          fetchDataProductsList({ id_token: "token" }) as any
+        );
+
+        const state = store.getState().dataproducts;
+        expect(state.dataProductsItems).toHaveLength(1);
+        expect(state.dataProductsItems).toEqual([numberFormProduct]);
+      });
+
+      it("still adds a search-only product not present in the primary list at all", async () => {
+        const searchOnlyEntry = {
+          dataplexEntry: {
+            createTime: { seconds: "1700000000" },
+            updateTime: { seconds: "1700000100" },
+            entrySource: {
+              resource: "projects/123456789/locations/us-central1/dataProducts/product-search-only",
+              displayName: "Search Only Product",
+              description: "Only found via search",
+            },
+          },
+        };
+
+        vi.mocked(axios.get).mockResolvedValueOnce({
+          status: 200,
+          data: { dataProducts: [numberFormProduct] },
+        });
+        vi.mocked(axios.post).mockResolvedValueOnce({
+          status: 200,
+          data: { results: [searchOnlyEntry] },
+        });
+
+        const store = createTestStore(mockSessionData);
+        await store.dispatch(
+          fetchDataProductsList({ id_token: "token" }) as any
+        );
+
+        const state = store.getState().dataproducts;
+        const items = state.dataProductsItems as any[];
+        expect(items).toHaveLength(2);
+        expect(items.map((p: any) => p.displayName)).toEqual(
+          expect.arrayContaining(["Product 1", "Search Only Product"])
+        );
+      });
+
+      it("marks search-only products as isOutOfScope, and leaves primary-list products without the flag", async () => {
+        const searchOnlyEntry = {
+          dataplexEntry: {
+            entrySource: {
+              resource: "projects/123456789/locations/us-central1/dataProducts/product-search-only",
+              displayName: "Search Only Product",
+            },
+          },
+        };
+
+        vi.mocked(axios.get).mockResolvedValueOnce({
+          status: 200,
+          data: { dataProducts: [numberFormProduct] },
+        });
+        vi.mocked(axios.post).mockResolvedValueOnce({
+          status: 200,
+          data: { results: [searchOnlyEntry] },
+        });
+
+        const store = createTestStore(mockSessionData);
+        await store.dispatch(
+          fetchDataProductsList({ id_token: "token" }) as any
+        );
+
+        const items = store.getState().dataproducts.dataProductsItems as any[];
+        const primaryItem = items.find((p) => p.displayName === "Product 1");
+        const searchOnlyItem = items.find((p) => p.displayName === "Search Only Product");
+        expect(primaryItem?.isOutOfScope).toBeFalsy();
+        expect(searchOnlyItem?.isOutOfScope).toBe(true);
+      });
+
+      it("does not list the same search-only product twice when the index returns it more than once", async () => {
+        // The Search index can return the same resource in more than one result.
+        // Each hit used to be tested only against the API list - never against
+        // the hits already accepted - so every repeat became its own card.
+        const duplicatedSearchEntry = {
+          dataplexEntry: {
+            entrySource: {
+              resource: "projects/123456789/locations/europe-west2/dataProducts/subtitles",
+              displayName: "subtitles",
+            },
+          },
+        };
+
+        vi.mocked(axios.get).mockResolvedValueOnce({
+          status: 200,
+          data: { dataProducts: [] },
+        });
+        vi.mocked(axios.post).mockResolvedValueOnce({
+          status: 200,
+          data: { results: [duplicatedSearchEntry, { ...duplicatedSearchEntry }] },
+        });
+
+        const store = createTestStore(mockSessionData);
+        await store.dispatch(fetchDataProductsList({ id_token: "token" }) as any);
+
+        const items = store.getState().dataproducts.dataProductsItems as any[];
+        expect(items.filter((p) => p.displayName === "subtitles")).toHaveLength(1);
+      });
+
+      it("matches a product across the two sources when one uses the project id and the other the project number", async () => {
+        // dataProducts.list and the Search index do not agree on how the project
+        // segment is spelled. Both spellings must resolve to the same product.
+        const idFormProduct = {
+          name: "projects/test-project/locations/europe-west2/dataProducts/subtitles",
+          displayName: "subtitles",
+        };
+        const numberFormSearchEntry = {
+          dataplexEntry: {
+            entrySource: {
+              resource: "projects/123456789/locations/europe-west2/dataProducts/subtitles",
+              displayName: "subtitles",
+            },
+          },
+        };
+
+        vi.mocked(axios.get).mockResolvedValueOnce({
+          status: 200,
+          data: { dataProducts: [idFormProduct] },
+        });
+        vi.mocked(axios.post).mockResolvedValueOnce({
+          status: 200,
+          data: { results: [numberFormSearchEntry] },
+        });
+
+        const store = createTestStore(mockSessionData);
+        await store.dispatch(fetchDataProductsList({ id_token: "token" }) as any);
+
+        const items = store.getState().dataproducts.dataProductsItems as any[];
+        expect(items).toHaveLength(1);
+        expect(items[0].isOutOfScope).toBeFalsy();
+      });
+
+      it("keeps same-named products in different projects as separate entries", async () => {
+        // Three real `subtitles` products in three projects must stay three rows -
+        // de-duplication must not key on location+id alone.
+        vi.mocked(axios.get).mockResolvedValueOnce({
+          status: 200,
+          data: {
+            dataProducts: [
+              { name: "projects/123456789/locations/europe-west2/dataProducts/subtitles", displayName: "subtitles" },
+              { name: "projects/987654321/locations/europe-west2/dataProducts/subtitles", displayName: "subtitles" },
+            ],
+          },
+        });
+        vi.mocked(axios.post).mockResolvedValueOnce({
+          status: 200,
+          data: { results: [] },
+        });
+
+        const store = createTestStore(mockSessionData);
+        await store.dispatch(fetchDataProductsList({ id_token: "token" }) as any);
+
+        const items = store.getState().dataproducts.dataProductsItems as any[];
+        expect(items).toHaveLength(2);
+      });
+
+      it("cannot match the two spellings without a project list - callers must gate on it", async () => {
+        // Both sources always contribute, so the merge has no way to recover here:
+        // with no project list there is nothing to translate id <-> number with and
+        // the shared product is listed twice. This is exactly the reported bug, and
+        // the reason every dispatch site gates on `isProjectMappingReady`. Pinned so
+        // the gates are not removed casually.
+        const idFormProduct = {
+          name: "projects/test-project/locations/europe-west2/dataProducts/subtitles",
+          displayName: "subtitles",
+        };
+        const numberFormSearchEntry = {
+          dataplexEntry: {
+            entrySource: {
+              resource: "projects/123456789/locations/europe-west2/dataProducts/subtitles",
+              displayName: "subtitles",
+            },
+          },
+        };
+
+        vi.mocked(axios.get).mockResolvedValueOnce({
+          status: 200,
+          data: { dataProducts: [idFormProduct] },
+        });
+        vi.mocked(axios.post).mockResolvedValueOnce({
+          status: 200,
+          data: { results: [numberFormSearchEntry] },
+        });
+
+        // Empty project list - /get-projects has not landed.
+        const store = createTestStore(mockSessionData, []);
+        await store.dispatch(fetchDataProductsList({ id_token: "token" }) as any);
+
+        const items = store.getState().dataproducts.dataProductsItems as any[];
+        expect(items).toHaveLength(2);
+      });
+    });
+
     describe("Rejected State", () => {
       it("sets status to failed and captures error on rejection", async () => {
         const axiosError = new AxiosError("Network Error");
@@ -371,13 +626,10 @@ describe("dataProductsSlice", () => {
         );
 
         expect(axios.get).toHaveBeenCalledWith(
-          expect.stringContaining(
-            "https://dataplex.googleapis.com/v1/projects/test-project/locations/us-central1:lookupEntry"
-          ),
+          expect.stringContaining("data-product-details"),
           expect.objectContaining({
             params: expect.objectContaining({
               entry: expect.stringContaining("projects/test-project"),
-              view: "ALL",
             }),
           })
         );
@@ -489,6 +741,31 @@ describe("dataProductsSlice", () => {
         expect(state.selectedDataProductStatus).toBe("failed");
         expect(state.selectedDataProductError).toBe("Details error");
       });
+
+      it("sets a plain PERMISSION_DENIED object (not a JSON string) on a 403", async () => {
+        const axiosError = new AxiosError("Forbidden");
+        (axiosError as any).response = { status: 403 };
+        vi.mocked(axios.get).mockRejectedValueOnce(axiosError);
+
+        const store = createTestStore(mockSessionData);
+        await store.dispatch(
+          getDataProductDetails({
+            id_token: "token",
+            dataProductId:
+              "projects/test-project/locations/us-central1/dataProducts/product-1",
+          }) as any
+        );
+
+        const state = store.getState().dataproducts;
+        expect(state.selectedDataProductStatus).toBe("failed");
+        // A plain object, not JSON.stringify'd - consumers branch on `.type`
+        // directly instead of having to parse it back out of a string.
+        expect(state.selectedDataProductError).toEqual({
+          type: "PERMISSION_DENIED",
+          message: "You don't have access to this resource",
+          itemId: "projects/test-project/locations/us-central1/dataProducts/product-1",
+        });
+      });
     });
   });
 
@@ -578,7 +855,12 @@ describe("dataProductsSlice", () => {
         );
 
         expect(axios.get).toHaveBeenCalledWith(
-          "https://dataplex.googleapis.com/v1/projects/test-project/locations/us-central1/dataProducts/product-1/dataAssets"
+          expect.stringContaining("data-product-assets"),
+          expect.objectContaining({
+            params: expect.objectContaining({
+              dataProduct: "projects/test-project/locations/us-central1/dataProducts/product-1",
+            }),
+          })
         );
       });
 
@@ -1027,7 +1309,12 @@ describe("dataProductsSlice", () => {
       );
 
       expect(axios.get).toHaveBeenCalledWith(
-        "https://dataplex.googleapis.com/v1/projects/my-project/locations/europe-west1/dataProducts/complex-product-name-123/dataAssets"
+        expect.stringContaining("data-product-assets"),
+        expect.objectContaining({
+          params: expect.objectContaining({
+            dataProduct: "projects/my-project/locations/europe-west1/dataProducts/complex-product-name-123",
+          }),
+        })
       );
     });
 
@@ -1053,8 +1340,12 @@ describe("dataProductsSlice", () => {
       );
 
       expect(axios.get).toHaveBeenCalledWith(
-        expect.stringContaining("project-with-dashes"),
-        expect.any(Object)
+        expect.stringContaining("data-product-details"),
+        expect.objectContaining({
+          params: expect.objectContaining({
+            project: "project-with-dashes",
+          }),
+        })
       );
     });
   });

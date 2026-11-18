@@ -36,6 +36,9 @@ export const AUTH_CONFIG = {
     '/home',
     '/search',
     '/view-details',
+    '/data-products',
+    '/data-products-details',
+    '/rc18-dashboard',
     '/admin-panel',
     '/browse-by-annotation',
     '/glossaries',
@@ -55,7 +58,11 @@ export const AUTH_CONFIG = {
  * OAuth scopes required by the application.
  * Checked against granted scopes at login time.
  */
-export const REQUIRED_SCOPES = [
+export const REQUIRED_SCOPES = import.meta.env.VITE_IS_SERVICE_ACCOUNT === 'true' ? [
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile',
+  'openid',
+] as const : [
   'https://www.googleapis.com/auth/cloud-platform',
   'https://www.googleapis.com/auth/bigquery',
   'https://www.googleapis.com/auth/dataplex.readonly',
@@ -63,14 +70,12 @@ export const REQUIRED_SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email',
 ] as const;
 
-/** IAM permissions required to use the application (user must have ALL) */
+/**
+ * IAM permissions checked on Knowledge Catalog (Dataplex API v1).
+ * Aligned with Knowledge Catalog fine-grained IAM roles (`roles/dataplex.catalogViewer`)
+ * without requiring legacy Dataplex Lake/Zone permissions.
+ */
 export const REQUIRED_PERMISSIONS = [
-  'dataplex.lakes.get',
-  'dataplex.lakes.list',
-  'dataplex.zones.get',
-  'dataplex.zones.list',
-  'dataplex.assets.get',
-  'dataplex.assets.list',
   'dataplex.entryGroups.get',
   'dataplex.entryGroups.list',
   'dataplex.entries.get',

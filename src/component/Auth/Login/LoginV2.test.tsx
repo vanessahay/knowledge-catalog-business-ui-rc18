@@ -232,7 +232,7 @@ describe('LoginV2', () => {
     it('should call login with access_token on successful Google auth', async () => {
       render(<LoginV2 />);
 
-      const tokenResponse = { access_token: 'test-access-token-123' };
+      const tokenResponse = { access_token: 'test-access-token-123' }; // pragma: allowlist secret
       await act(async () => {
         await capturedGoogleLoginConfig.onSuccess?.(tokenResponse);
       });
@@ -257,7 +257,10 @@ describe('LoginV2', () => {
 
       expect(mockSanitizeRedirectURL).toHaveBeenCalledWith('/dashboard');
       expect(consoleLog).toHaveBeenCalledWith('[Login] Redirecting to:', '/dashboard');
-      expect(mockNavigate).toHaveBeenCalledWith('/dashboard', { replace: true });
+      expect(mockNavigate).toHaveBeenCalledWith('/dashboard', {
+        replace: true,
+        state: { fromAuth: true },
+      });
 
       consoleLog.mockRestore();
     });
@@ -328,7 +331,10 @@ describe('LoginV2', () => {
           await capturedGoogleLoginConfig.onSuccess?.(tokenResponse);
         });
 
-        expect(mockNavigate).toHaveBeenCalledWith(sanitized, { replace: true });
+        expect(mockNavigate).toHaveBeenCalledWith(sanitized, {
+          replace: true,
+          state: { fromAuth: true },
+        });
 
         consoleLog.mockRestore();
       }

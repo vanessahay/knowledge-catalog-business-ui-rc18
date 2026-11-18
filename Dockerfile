@@ -12,6 +12,8 @@ RUN VITE_API_URL=__VITE_API_URL__ \
     VITE_GOOGLE_PROJECT_ID=__VITE_GOOGLE_PROJECT_ID__ \
     VITE_GOOGLE_CLIENT_ID=__VITE_GOOGLE_CLIENT_ID__ \
     VITE_GOOGLE_REDIRECT_URI=__VITE_GOOGLE_REDIRECT_URI__ \
+    VITE_IS_SERVICE_ACCOUNT=__VITE_IS_SERVICE_ACCOUNT__ \
+    VITE_FEATURE_REQUEST_ACCESS=__VITE_FEATURE_REQUEST_ACCESS__ \
     npm run build
 
 # EXPOSE 80
@@ -21,7 +23,7 @@ FROM node:20-alpine AS backend
 
 WORKDIR /app
 
-# Copy backend files (build v31)
+# Copy backend files
 COPY backend/package.json ./
 RUN npm install
 

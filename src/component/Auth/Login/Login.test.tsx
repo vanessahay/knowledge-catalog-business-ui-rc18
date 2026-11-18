@@ -184,7 +184,7 @@ describe('Login', () => {
     it('should call login with access_token on successful Google auth', async () => {
       render(<Login />);
 
-      const tokenResponse = { access_token: 'test-access-token-123' };
+      const tokenResponse = { access_token: 'test-access-token-123' }; // pragma: allowlist secret
       await capturedGoogleLoginConfig.onSuccess?.(tokenResponse);
 
       expect(mockLogin).toHaveBeenCalledWith({

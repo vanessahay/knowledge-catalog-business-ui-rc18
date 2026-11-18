@@ -16,11 +16,13 @@ import NotificationBar from '../SearchPage/NotificationBar';
 import ShimmerLoader from '../Shimmer/ShimmerLoader';
 import PreviewAnnotationSkeleton from '../Annotation/PreviewAnnotationSkeleton';
 import type { AppDispatch } from '../../app/store';
-import { getName, getEntryType, generateBigQueryLink, hasValidAnnotationData, generateLookerStudioLink, getFormattedDateTimePartsByDateTime, extractProjectNumberFromEntryName, resolveProjectDisplayName } from '../../utils/resourceUtils';
+import { useAppBootstrapStatus } from '../../hooks/useAppBootstrap';
+import { getName, getEntryType, generateBigQueryLink, hasValidAnnotationData, generateLookerStudioLink, getFormattedDateTimePartsByDateTime, extractProjectNumberFromEntryName, resolveProjectDisplayNameOrFallback } from '../../utils/resourceUtils';
 // import { useFavorite } from '../../hooks/useFavorite';
 import { useAuth } from '../../auth/AuthProvider';
 import { usePreviewEntry } from '../../hooks/usePreviewEntry';
 import { useAccessRequest } from '../../contexts/AccessRequestContext';
+import { FEATURE_FLAGS } from '../../utils/featureFlags';
 
 /**
  * @file ResourcePreview.tsx
@@ -127,6 +129,10 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
   const reduxEntryStatus = useSelector((state: any) => state.entry.status);
   const reduxEntryError = useSelector((state: any) => state.entry.error);
   const projectsList = useSelector((state: any) => state.projects.items);
+  // See DetailPageOverview: "settled" rather than "loaded", so a failed
+  // /get-projects falls back to the project number instead of showing '-'
+  // forever.
+  const { areProjectsReady } = useAppBootstrapStatus();
 
   // Isolated preview hook (used in 'isolated' mode)
   const {
@@ -167,8 +173,13 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
   const hasAnnotations = entry?.aspects ? Object.keys(entry.aspects).some(key => hasValidAnnotationData(entry.aspects[key])) : false;
 
 
-  const { date: creationDate, time: creationTime } = getFormattedDateTimePartsByDateTime(previewData?.createTime);
-  const { date: updateDate, time: updateTime } = getFormattedDateTimePartsByDateTime(previewData?.updateTime);
+  // Prefer entrySource's create/update time (the underlying resource's actual
+  // timestamps, e.g. from BigQuery) over the top-level entry fields, which
+  // reflect Dataplex's catalog/aspect metadata and can lag or drift ahead of
+  // the real resource (e.g. after a re-scan touches an aspect). Displayed in
+  // the viewer's local timezone, same as the rest of the app.
+  const { date: creationDate, time: creationTime } = getFormattedDateTimePartsByDateTime(previewData?.entrySource?.createTime ?? previewData?.createTime);
+  const { date: updateDate, time: updateTime } = getFormattedDateTimePartsByDateTime(previewData?.entrySource?.updateTime ?? previewData?.updateTime);
 
 
   const projectDisplayName = useMemo(() => {
@@ -181,13 +192,11 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
       extractProjectNumberFromEntryName(previewData?.parentEntry);
 
     if (projectNumber) {
-      const resolved = resolveProjectDisplayName(projectNumber, projectsList);
-      if (resolved) return resolved;
-      return projectNumber;
+      return resolveProjectDisplayNameOrFallback(projectNumber, projectsList, areProjectsReady) || '-';
     }
 
     return '-';
-  }, [previewData?.fullyQualifiedName, previewData?.name, previewData?.parentEntry, projectsList]);
+  }, [previewData?.fullyQualifiedName, previewData?.name, previewData?.parentEntry, projectsList, areProjectsReady]);
 
   const isTable = previewData?.name ? getEntryType(previewData.name, '/') == 'Tables' : false;
   const aspectsTabIndex = isTable ? 2 : 1;
@@ -202,7 +211,7 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
       onViewDetails(entry);
     } else {
       dispatch(clearHistory());
-      navigate('/view-details');
+      navigate(`/view-details?entry=${encodeURIComponent(btoa(entry.name))}`);
     }
   };
 
@@ -251,6 +260,7 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
       return generateBigQueryLink(entry);
     }, [entry]);
 
+  const isBigQuery = previewData?.entrySource?.system?.toLowerCase() === 'bigquery';
 
     const getDisplayName = (contact: any) => {
     try {
@@ -346,7 +356,7 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
     annotationTab = <PreviewAnnotation entry={filteredAnnotationEntry || entry} css={{
       width: "100%",
       backgroundColor: mode === 'dark' ? '#131314' : '#FFFFFF',
-      overflow: "hidden",
+      overflow: "visible",
     }} isTopComponent={false}
     expandedItems={expandedAnnotations}
     setExpandedItems={setExpandedAnnotations}
@@ -444,7 +454,7 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
           alignItems: 'stretch',
           padding: 'var(--cta-pt) 0 0',
           gap: 'var(--cta-gap)',
-          marginBottom: 'var(--cta-mb)',
+          marginBottom: (FEATURE_FLAGS.enableRequestAccess || isBigQuery) ? 'var(--cta-mb)' : '4px',
           flex: '0 0 auto',
         }}>
           {/* View Details - full width */}
@@ -478,8 +488,9 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
           </Tooltip>
 
           {/* Request Access + Icon buttons row */}
-          <div className="preview-cta-row" style={{ display: 'flex', alignItems: 'center', gap: 'var(--btn-gap)' }}>
-            <Box
+          {(FEATURE_FLAGS.enableRequestAccess || isBigQuery) && (
+          <div className="preview-cta-row" style={{ display: 'flex', alignItems: 'center', gap: 'var(--btn-gap)', justifyContent: FEATURE_FLAGS.enableRequestAccess ? 'flex-start' : 'center' }}>
+            {FEATURE_FLAGS.enableRequestAccess && <Box
               component="button"
               sx={{
                 flex: '1 1 auto',
@@ -511,10 +522,10 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
             >
               <LockOutlined sx={{ fontSize: 'var(--lock-icon-size)', color: mode === 'dark' ? '#ffffff' : '#575757', flexShrink: 0, transition: 'color 0.2s ease' }} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>Request Access</span>
-            </Box>
+            </Box>}
 
             {/* BigQuery icon button */}
-            {previewData.entrySource?.system?.toLowerCase() === 'bigquery' && (
+            {isBigQuery && (
               <Tooltip title={entryStatus !== 'succeeded' ? "Loading link..." : "Open in BigQuery"} arrow>
                 <Box
                   component="button"
@@ -553,7 +564,7 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
             )}
 
             {/* Looker icon button */}
-            {previewData.entrySource?.system?.toLowerCase() === 'bigquery' && (
+            {isBigQuery && (
               <Tooltip title={entryStatus !== 'succeeded' ? "Loading link..." : (demoMode ? "Disabled in Demo Mode" : "Explore with Looker Studio")} arrow>
                 <Box
                   component="button"
@@ -591,6 +602,7 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
               </Tooltip>
             )}
           </div>
+          )}
         </div>
 
         {/* Tabs Section */}
@@ -703,7 +715,7 @@ const ResourcePreview: React.FC<ResourcePreviewProps> = ({
                   <div style={{ borderBottom: mode === 'dark' ? '1px solid #3c4043' : '1px solid #E8EAED', padding: 'var(--desc-section-padding)' }}>
                     <div style={{ color: mode === 'dark' ? '#dedfe0' : '#575757', fontSize: 'var(--desc-label-size)', fontWeight: 500 }}>Description</div>
                     {(() => {
-                      const desc = previewData.entrySource.description || '-';
+                      const desc = (previewData.entrySource.description || '-').trim();
                       const maxLength = 150;
                       const isLong = desc.length > maxLength;
                       return (

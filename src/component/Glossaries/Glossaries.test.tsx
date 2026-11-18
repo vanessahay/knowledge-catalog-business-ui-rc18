@@ -1,20 +1,34 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { configureStore } from '@reduxjs/toolkit';
 import { Provider } from 'react-redux';
 import Glossaries from './Glossaries';
 import type { GlossaryItem } from './GlossaryDataType';
+import SidebarItem from './SidebarItem';
+import { getBreadcrumbs } from '../../utils/glossaryUtils';
 
 // Mock react-router-dom
 vi.mock('react-router-dom', () => ({
   useNavigate: () => vi.fn(),
   useLocation: () => ({ pathname: '/glossaries' }),
+  useSearchParams: () => [new URLSearchParams(), vi.fn()],
 }));
 
 // Mock auth provider
 vi.mock('../../auth/AuthProvider', () => ({
   useAuth: () => ({ user: { token: 'test-token' } }),
+}));
+
+// appConfig/get-projects bootstrapping is now handled globally by
+// useAppBootstrap (see src/hooks/useAppBootstrap.test.ts); these tests
+// assume the bootstrap has already completed.
+vi.mock('../../hooks/useAppBootstrap', () => ({
+  useAppBootstrapStatus: () => ({
+    isAppConfigReady: true,
+    areProjectsReady: true,
+    isBootstrapping: false,
+  }),
 }));
 
 // Mock glossary utils with stable implementations
@@ -38,7 +52,9 @@ vi.mock('../../utils/glossaryUtils', () => ({
     };
     return find(items);
   },
-  getBreadcrumbs: () => [],
+  // Wrapped in vi.fn() so the accordion regression test can swap in the real
+  // implementation for its scope only, then restore this default.
+  getBreadcrumbs: vi.fn(() => []),
   collectAllIds: () => [],
   collectAncestorIdsOfMatches: () => [],
 }));
@@ -75,8 +91,12 @@ vi.mock('./glossaryUIHelpers', () => ({
 }));
 
 // Mock child components
+// Wrapped in vi.fn() (rather than a plain arrow function) so a single test can
+// override the implementation via mockImplementation — e.g. to render children
+// recursively for the sidebar-accordion regression test — without changing
+// behavior for the ~120 other tests that rely on this flat default stub.
 vi.mock('./SidebarItem', () => ({
-  default: ({ item, selectedId, onSelect, onToggle }: any) => (
+  default: vi.fn(({ item, selectedId, onSelect, onToggle }: any) => (
     <div
       data-testid={`sidebar-item-${item.id}`}
       data-selected={selectedId === item.id}
@@ -93,7 +113,7 @@ vi.mock('./SidebarItem', () => ({
         Toggle
       </button>
     </div>
-  ),
+  )),
 }));
 
 vi.mock('../Common/FilterBar', () => ({
@@ -460,6 +480,16 @@ describe('Glossaries', () => {
     it('renders empty state when no glossaries and succeeded', () => {
       renderWithStore({ glossaries: { status: 'succeeded', glossaryItems: [] } });
       expect(screen.getByText('No results found')).toBeInTheDocument();
+    });
+
+    it('shows the skeleton, not "No results found", before the first fetch starts', () => {
+      // status stays 'idle' until the mount effect dispatches, and that effect
+      // waits on appConfig - so this is the whole /app-configs round trip, not a
+      // single frame. "No results found" would claim we looked and found nothing
+      // before anything had been requested.
+      renderWithStore({ glossaries: { status: 'idle', glossaryItems: [] } });
+      expect(screen.getByTestId('shimmer-simple-list')).toBeInTheDocument();
+      expect(screen.queryByText('No results found')).not.toBeInTheDocument();
     });
 
     it('renders glossary items in sidebar when available', () => {
@@ -1471,6 +1501,106 @@ describe('Glossaries', () => {
 
       expect(screen.getByTestId('sidebar-item-glossary-1')).toBeInTheDocument();
     });
+
+    it('collapses a sibling category when a new category is expanded (accordion behavior)', async () => {
+      // Regression test: expanding category-b while sibling category-a (under
+      // the same glossary) is already expanded must collapse category-a — this
+      // mirrors the pre-existing "collapse other root glossaries" behavior,
+      // which previously only applied at the root level, not to categories.
+      //
+      // The shared SidebarItem mock used by every other test in this file is a
+      // flat, non-recursive stub, so nested categories never render through
+      // it. We temporarily swap in a recursive implementation (and give
+      // getBreadcrumbs its real implementation) just for this test, then
+      // restore both so no other test is affected.
+      const user = userEvent.setup();
+      const originalSidebarItemImpl = (SidebarItem as unknown as ReturnType<typeof vi.fn>).getMockImplementation();
+      const originalGetBreadcrumbsImpl = (getBreadcrumbs as unknown as ReturnType<typeof vi.fn>).getMockImplementation();
+
+      const RecursiveSidebarItem = ({ item, selectedId, expandedIds, onSelect, onToggle }: any) => (
+        <div
+          data-testid={`sidebar-item-${item.id}`}
+          data-selected={selectedId === item.id}
+          onClick={() => onSelect(item.id)}
+        >
+          <span>{item.displayName}</span>
+          <button
+            data-testid={`toggle-${item.id}`}
+            onClick={(e: React.MouseEvent) => {
+              e.stopPropagation();
+              onToggle(item.id);
+            }}
+          >
+            Toggle
+          </button>
+          {expandedIds?.has(item.id) &&
+            item.children?.map((child: GlossaryItem) => (
+              <SidebarItem
+                key={child.id}
+                item={child}
+                selectedId={selectedId}
+                expandedIds={expandedIds}
+                onSelect={onSelect}
+                onToggle={onToggle}
+              />
+            ))}
+        </div>
+      );
+
+      (SidebarItem as unknown as ReturnType<typeof vi.fn>).mockImplementation(RecursiveSidebarItem);
+      const actualGlossaryUtils = await vi.importActual<typeof import('../../utils/glossaryUtils')>(
+        '../../utils/glossaryUtils'
+      );
+      (getBreadcrumbs as unknown as ReturnType<typeof vi.fn>).mockImplementation(actualGlossaryUtils.getBreadcrumbs);
+
+      try {
+        // Don't pre-seed expandedIds via Redux: on mount, auto-selecting the
+        // first item drives a separate "expand ancestors of selection" effect
+        // (Glossaries.tsx, the effect keyed on `selectedId`) that recomputes
+        // expandedIds from scratch and would stomp any pre-seeded value before
+        // our clicks even happen. Instead let that effect settle naturally
+        // (it expands the root glossary), then drive category expansion
+        // purely via the toggle buttons, which never touch `selectedId` and
+        // so never re-trigger that effect.
+        const { store } = renderWithStore({
+          glossaries: {
+            status: 'succeeded',
+            glossaryItems: [mockGlossaryWithNestedTerms],
+          },
+        });
+        const dispatchSpy = vi.spyOn(store, 'dispatch');
+
+        await waitFor(() => {
+          expect(screen.getByTestId('toggle-category-a')).toBeInTheDocument();
+          expect(screen.getByTestId('toggle-category-b')).toBeInTheDocument();
+        });
+
+        // Expand category-a first (simulating the "one category already
+        // expanded" precondition from the bug report), then category-b.
+        await user.click(screen.getByTestId('toggle-category-a'));
+        dispatchSpy.mockClear();
+        await user.click(screen.getByTestId('toggle-category-b'));
+
+        await waitFor(() => {
+          const expandedIdsPayloads = dispatchSpy.mock.calls
+            .map(([action]: any) => action)
+            .filter((action: any) => action?.type === 'glossaries/setGlossaryExpandedIds')
+            .map((action: any) => action.payload as string[]);
+          expect(expandedIdsPayloads.length).toBeGreaterThan(0);
+
+          const lastPayload = expandedIdsPayloads[expandedIdsPayloads.length - 1];
+          expect(lastPayload).toContain('category-b');
+          expect(lastPayload).not.toContain('category-a');
+        });
+      } finally {
+        (SidebarItem as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+          originalSidebarItemImpl as any
+        );
+        (getBreadcrumbs as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+          originalGetBreadcrumbsImpl as any
+        );
+      }
+    });
   });
 
   describe('Handle Navigate Scenarios', () => {
@@ -1514,6 +1644,111 @@ describe('Glossaries', () => {
       renderWithStore({ glossaries: { status: 'succeeded', glossaryItems: [] } });
 
       expect(screen.getByAltText('Select an item')).toBeInTheDocument();
+    });
+
+    it('fetches the auto-selected first glossary\'s children when it has none', async () => {
+      // Without this, a glossary selected automatically on mount (never
+      // through handleToggle) renders with empty Categories/Terms tabs,
+      // since those derive from item.children. The spy has to be attached
+      // before render - the mount effect that dispatches this fires
+      // synchronously within render(), so attaching it afterward (as
+      // renderWithStore's own returned store would require) misses the call.
+      const store = createMockStore({
+        glossaries: { status: 'succeeded', glossaryItems: [mockGlossaryNoChildren] },
+      });
+      const dispatchSpy = vi.spyOn(store, 'dispatch');
+      render(
+        <Provider store={store}>
+          <Glossaries />
+        </Provider>
+      );
+
+      await waitFor(() => {
+        expect(
+          dispatchSpy.mock.calls.some(
+            ([action]: any) => action?.type === 'glossaries/fetchGlossaryChildren'
+          )
+        ).toBe(true);
+      });
+    });
+
+    it('does not eagerly prefetch children for every root glossary on mount', async () => {
+      // There used to be an effect here that dispatched fetchGlossaryChildren
+      // once per root glossary on mount - up to N requests, each fanning out
+      // to two upstream calls. Only the auto-selected first glossary should
+      // be warmed; the rest load lazily on expand.
+      const secondGlossary: GlossaryItem = {
+        ...mockGlossaryNoChildren,
+        id: 'glossary-empty-2',
+        displayName: 'Empty Glossary 2',
+      };
+      const store = createMockStore({
+        glossaries: {
+          status: 'succeeded',
+          glossaryItems: [mockGlossaryNoChildren, secondGlossary],
+        },
+      });
+      const dispatchSpy = vi.spyOn(store, 'dispatch');
+      render(
+        <Provider store={store}>
+          <Glossaries />
+        </Provider>
+      );
+
+      await waitFor(() => {
+        expect(screen.getByTestId(`sidebar-item-${mockGlossaryNoChildren.id}`)).toBeInTheDocument();
+      });
+
+      const childrenFetchCalls = dispatchSpy.mock.calls.filter(
+        ([action]: any) => action?.type === 'glossaries/fetchGlossaryChildren'
+      );
+      expect(childrenFetchCalls).toHaveLength(1);
+    });
+  });
+
+  describe('Children loading state (handleToggle)', () => {
+    // An expanded node with no children is ambiguous - still loading, or
+    // genuinely empty - so SidebarItem needs to know which nodes are actively
+    // being fetched in order to show a skeleton only for the former.
+    it('marks a node as loading when its children are fetched on expand, and clears it once the fetch settles', async () => {
+      const SidebarItemMock = SidebarItem as unknown as ReturnType<typeof vi.fn>;
+      renderWithStore({
+        glossaries: { status: 'succeeded', glossaryItems: [mockGlossaryNoChildren] },
+      });
+
+      const lastLoadingIdsFor = (id: string) => {
+        const calls = SidebarItemMock.mock.calls.filter(([props]: any) => props.item.id === id);
+        const lastCall = calls[calls.length - 1];
+        return lastCall?.[0]?.loadingChildrenIds as Set<string> | undefined;
+      };
+
+      await waitFor(() => {
+        expect(screen.getByTestId(`sidebar-item-${mockGlossaryNoChildren.id}`)).toBeInTheDocument();
+      });
+      expect(lastLoadingIdsFor(mockGlossaryNoChildren.id)?.has(mockGlossaryNoChildren.id)).toBeFalsy();
+
+      // The auto-select effect already added this glossary to expandedIds (it's
+      // the selected root glossary), so the first toggle click collapses it -
+      // the second one is the one that re-opens it and hits the no-children fetch
+      // branch. fireEvent + act flush each click's synchronous state update
+      // (markChildrenLoading runs before the fetch's promise chain gets a turn)
+      // without yielding to the microtask queue first, unlike userEvent.click -
+      // so the loading flag is observable here rather than racing the fetch's
+      // near-instant test-env rejection.
+      act(() => {
+        fireEvent.click(screen.getByTestId(`toggle-${mockGlossaryNoChildren.id}`));
+      });
+      act(() => {
+        fireEvent.click(screen.getByTestId(`toggle-${mockGlossaryNoChildren.id}`));
+      });
+      expect(lastLoadingIdsFor(mockGlossaryNoChildren.id)?.has(mockGlossaryNoChildren.id)).toBe(true);
+
+      // fetchGlossaryChildren has no backend to actually succeed against here,
+      // but it still settles (rejects), which is what the `.finally` clearing
+      // the flag depends on.
+      await waitFor(() => {
+        expect(lastLoadingIdsFor(mockGlossaryNoChildren.id)?.has(mockGlossaryNoChildren.id)).toBeFalsy();
+      });
     });
   });
 

@@ -269,7 +269,7 @@ describe("User Interface", () => {
 
   describe("Token Property", () => {
     it("accepts JWT format token", () => {
-      const jwtToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+      const jwtToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"; // pragma: allowlist secret
       const user: User = {
         name: undefined,
         email: undefined,
@@ -698,7 +698,7 @@ describe("User Interface", () => {
         name: "Authenticated User",
         email: "auth.user@company.com",
         picture: "https://lh3.googleusercontent.com/a/default-user",
-        token: "ya29.a0AfH6SMBxxxxxx",
+        token: "mock-oauth-session-token",
         tokenExpiry: now + 3600, // Expires in 1 hour
         tokenIssuedAt: now,
         hasRole: true,

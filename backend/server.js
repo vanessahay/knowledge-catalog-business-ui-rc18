@@ -4,38 +4,46 @@ const fs = require('fs').promises;
 const { GoogleAuth, OAuth2Client } = require('google-auth-library');
 const { google } = require('googleapis');
 const { CatalogServiceClient, DataScanServiceClient, protos, DataplexServiceClient } = require('@google-cloud/dataplex');
-let DlpServiceClient = null;
-try {
-  DlpServiceClient = require('@google-cloud/dlp').DlpServiceClient;
-} catch (e) {
-  // Will use googleapis dlp if @google-cloud/dlp is not present
-}
 const { LineageClient } = require('@google-cloud/lineage');
 const { ProjectsClient } = require('@google-cloud/resource-manager');
 const { DataCatalogClient } = require('@google-cloud/datacatalog');
 const path = require('path');
 const cors = require('cors');
+const compression = require('compression');
 const { querySampleFromBigQuery } = require('./utility');
 const { sendAccessRequestEmail, sendFeedbackEmail, sendDataplexAccessRequest } = require('./services/emailService');
 const { BigQuery } = require('@google-cloud/bigquery');
 const rateLimit = require('express-rate-limit');
 const { default: axios } = require('axios');
+const { googleAuthMiddleware } = require('./middleware/googleAuth');
+const { createRc18Router } = require('./routes/rc18Routes');
 
-// Helper to dynamically resolve target GCP Project ID across local dev, Docker, Cloud Run, and GKE environments
-const getGcpProjectId = () => {
-  return process.env.GOOGLE_CLOUD_PROJECT_ID ||
-         process.env.GOOGLE_CLOUD_PROJECT ||
-         process.env.GCP_PROJECT ||
-         process.env.PROJECT_ID ||
-         'your-project-id';
-};
+// Plug-and-play environment defaults so deployments work even when optional env vars are omitted
+if (!process.env.GCP_LOCATION) {
+  process.env.GCP_LOCATION = process.env.GCP_REGION || 'global';
+}
+if (!process.env.GCP_REGION) {
+  process.env.GCP_REGION = process.env.GCP_LOCATION || 'global';
+}
+if (!process.env.GOOGLE_CLOUD_PROJECT_ID) {
+  const detectedEnvProject =
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.GCP_PROJECT ||
+    process.env.PROJECT_ID;
+  if (detectedEnvProject) {
+    process.env.GOOGLE_CLOUD_PROJECT_ID = detectedEnvProject;
+  } else {
+    new GoogleAuth()
+      .getProjectId()
+      .then((pid) => {
+        if (pid && !process.env.GOOGLE_CLOUD_PROJECT_ID) {
+          process.env.GOOGLE_CLOUD_PROJECT_ID = pid;
+        }
+      })
+      .catch(() => {});
+  }
+}
 
-// Helper to dynamically resolve target GCP Location/Region
-const getGcpLocation = () => {
-  return process.env.GCP_LOCATION ||
-         process.env.GCP_REGION ||
-         'global';
-};
 
 class CustomGoogleAuth extends GoogleAuth {
   constructor(token) {
@@ -53,6 +61,36 @@ class CustomGoogleAuth extends GoogleAuth {
   async getUniverseDomain() {
     return 'googleapis.com'; // default public cloud domain
   }
+}
+
+// When IS_SERVICE_ACCOUNT=true, all Google Cloud service clients authenticate
+// with the runtime's service account (Application Default Credentials).
+// Otherwise they use the caller's OAuth access token forwarded from the frontend.
+const SERVICE_ACCOUNT_SCOPES = ['https://www.googleapis.com/auth/cloud-platform'];
+let serviceAccountAuth = null;
+
+function isServiceAccountMode() {
+  return process.env.IS_SERVICE_ACCOUNT === 'true';
+}
+
+function getServiceAccountAuth() {
+  if (!serviceAccountAuth) {
+    serviceAccountAuth = new GoogleAuth({ scopes: SERVICE_ACCOUNT_SCOPES });
+  }
+  return serviceAccountAuth;
+}
+
+// Returns the auth object passed as `auth`/`authClient` to Google Cloud
+// service clients. Service-account mode ignores the caller's token.
+function getAuthClient(accessToken) {
+  return isServiceAccountMode() ? getServiceAccountAuth() : new CustomGoogleAuth(accessToken);
+}
+
+// Returns a raw OAuth access token string for direct REST (axios) calls.
+// In service-account mode this mints a token from the service account;
+// otherwise it returns the caller's forwarded access token.
+async function getRequestAccessToken(accessToken) {
+  return isServiceAccountMode() ? await getServiceAccountAuth().getAccessToken() : accessToken;
 }
 const searchEntries = async (dataplexClientv1, query, parent) => {
   try {
@@ -136,8 +174,19 @@ app.use((req, res, next) => {
 
 
 
+// gzip responses. Mounted before the routes so it covers every API payload.
+// /get-projects in particular can be ~4.5 MB uncompressed for a 40k-project org,
+// which compresses to roughly a tenth of that given how repetitive the shape is.
+app.use(compression());
+
 // Middleware to parse JSON request bodies
 app.use(express.json());
+
+// Verify the Google OAuth access token on every backend API request.
+// Mounted on /api so it protects all /api/* routes while leaving static asset
+// serving and the SPA catch-all untouched. Public endpoints (health checks)
+// are skipped inside the middleware.
+app.use('/api', googleAuthMiddleware);
 
 // Serve static files from the React build folder
 const staticFilesPath = path.join(__dirname, 'dist'); 
@@ -206,50 +255,64 @@ function checkErrorAndSendResponse(res, error, customMessage) {
  */
 
 app.post('/api/v1/check-permissions', async (req, res) => {
+
     const { permissions } = req.body;
     const accessToken = req.headers.authorization?.split(' ')[1];
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || 'your-project-id';
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
 
-    // Mock token or unauthenticated check
-    if (!accessToken || accessToken === 'null' || accessToken === 'undefined' || accessToken.startsWith('mock-')) {
-        return res.json({
-            hasPermission: true,
-            grantedPermissions: permissions || [],
-            missingPermissions: [],
-            message: 'Local mock / dev mode.'
-        });
+    // --- Input Validation ---
+    if (!projectId || typeof projectId !== 'string' || projectId.trim() === '') {
+        return res.status(400).json({ error: 'projectId is required and must be a non-empty string.' });
+    }
+    if (!Array.isArray(permissions) || permissions.length === 0 || !permissions.every(p => typeof p === 'string' && p.trim() !== '')) {
+        return res.status(400).json({ error: 'permissions is required and must be a non-empty array of strings.' });
     }
 
     try {
-        const oauth2Client = new CustomGoogleAuth(accessToken);
+        const oauth2Client = getAuthClient(accessToken);
+
+        // Get the Cloud Resource Manager API client
         const cloudResourceManager = google.cloudresourcemanager({
             version: 'v1',
             auth: oauth2Client,
         });
 
-        console.log(`[IAM Check] Testing ${permissions?.length} permissions for project: ${projectId}`);
+        // Use testIamPermissions to check the user's effective permissions
+        console.log(`Testing ${permissions.length} permissions for project: ${projectId}`);
         const response = await cloudResourceManager.projects.testIamPermissions({
             resource: projectId,
-            requestBody: { permissions: permissions || [] },
+            requestBody: { permissions },
         });
 
         const grantedPermissions = response.data.permissions || [];
-        const missingPermissions = (permissions || []).filter(p => !grantedPermissions.includes(p));
+        const missingPermissions = permissions.filter(p => !grantedPermissions.includes(p));
+        // Under Knowledge Catalog's fine-grained IAM model, users may hold roles/dataplex.catalogViewer
+        // (or permissions on spoke projects configured in configData.json) rather than every legacy permission.
+        const hasPermission = grantedPermissions.length > 0 || isServiceAccountMode();
+
+        console.log(`Granted ${grantedPermissions.length}/${permissions.length} permissions for project ${projectId}.`);
+        if (missingPermissions.length > 0) {
+            console.log(`Missing permissions:`, missingPermissions);
+        }
 
         return res.json({
-            hasPermission: true,
+            hasPermission,
             grantedPermissions,
             missingPermissions,
-            message: `Permissions checked for project ${projectId}.`
+            message: hasPermission
+                ? `User has Knowledge Catalog access on project ${projectId}.`
+                : `User is missing ${missingPermissions.length} permission(s) on project ${projectId}.`,
         });
+
     } catch (error) {
-        console.warn('[IAM Check] Warning testing permissions (granting access for authenticated user):', error.message);
-        return res.json({
-            hasPermission: true,
-            grantedPermissions: permissions || [],
-            missingPermissions: [],
-            message: 'Authenticated user permission check granted.'
-        });
+        console.error('Error checking permissions:', error.message);
+        if (error.code === 403 || (error.errors && error.errors[0] && error.errors[0].reason === 'FORBIDDEN')) {
+            return res.status(403).json({
+                error: 'Permission Denied: Unable to test permissions for this project.',
+                details: error.message
+            });
+        }
+        return checkErrorAndSendResponse(res, error, 'An error occurred while checking permissions:');
     }
 });
 
@@ -276,7 +339,7 @@ app.post('/api/v1/search', async (req, res) => {
     const location = process.env.GCP_LOCATION;
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexClientv1 = new CatalogServiceClient({
         auth: oauth2Client,
@@ -333,7 +396,7 @@ app.post('/api/v1/aspects', async (req, res) => {
 
   try {
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexClientv1 = new CatalogServiceClient({
         auth: oauth2Client,
@@ -376,7 +439,7 @@ app.post('/api/v1/batch-aspects', async (req, res) => {
 
     try {
 
-        const oauth2Client = new CustomGoogleAuth(accessToken);
+        const oauth2Client = getAuthClient(accessToken);
 
         const dataplexClientv1 = new CatalogServiceClient({
             auth: oauth2Client,
@@ -417,7 +480,7 @@ app.get('/api/v1/aspect-types', async (req, res) => {
     const location = process.env.GCP_LOCATION;
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexClientv1 = new CatalogServiceClient({
         auth: oauth2Client,
@@ -452,7 +515,7 @@ app.get('/api/v1/entry-list', async (req, res) => {
     const location = process.env.GCP_LOCATION;
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexClientv1 = new CatalogServiceClient({
         auth: oauth2Client,
@@ -487,7 +550,7 @@ app.get('/api/v1/entry-types', async (req, res) => {
     const location = process.env.GCP_LOCATION;
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexClientv1 = new CatalogServiceClient({
         auth: oauth2Client,
@@ -523,7 +586,7 @@ app.get('/api/v1/get-entry', async (req, res) => {
     const entryName = req.query.entryName; // Get entryName from query parameters
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexClientv1 = new CatalogServiceClient({
         auth: oauth2Client,
@@ -554,7 +617,7 @@ app.get('/api/v1/check-entry-access', async (req, res) => {
     const entryName = req.query.entryName;
     const accessToken = req.headers.authorization?.split(' ')[1];
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
     const dataplexClientv1 = new CatalogServiceClient({
       auth: oauth2Client,
     });
@@ -590,7 +653,7 @@ app.get('/api/v1/get-entry-by-fqn', async (req, res) => {
     const location = process.env.GCP_LOCATION;
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexClientv1 = new CatalogServiceClient({
         auth: oauth2Client,
@@ -638,7 +701,7 @@ app.get('/api/v1/lookup-entry', async (req, res) => {
     const entryName = req.query.entryName; // Get entryName from query parameters
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexClientv1 = new CatalogServiceClient({
         auth: oauth2Client,
@@ -678,10 +741,11 @@ app.get('/api/v1/lookup-entry-links', async (req, res) => {
     }
     const [, project, location] = match;
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
     const dataplexClientv1 = new CatalogServiceClient({ auth: oauth2Client });
 
     const url = `https://dataplex.googleapis.com/v1/projects/${project}/locations/${location}:lookupEntryLinks`;
+    const bearerToken = await getRequestAccessToken(accessToken);
 
     const response = await axios.get(url, {
       params: {
@@ -692,7 +756,7 @@ app.get('/api/v1/lookup-entry-links', async (req, res) => {
         page_size: 50,
       },
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${bearerToken}`,
         'Content-Type': 'application/json',
       },
     });
@@ -751,6 +815,300 @@ app.get('/api/v1/lookup-entry-links', async (req, res) => {
   }
 });
 
+
+
+/**
+ * GET /api/v1/data-products
+ * Lists the Dataplex data products for the configured (or supplied) project.
+ * Proxies the Dataplex `dataProducts` REST API.
+ *
+ * Query params:
+ *   projectId (optional) - overrides GOOGLE_CLOUD_PROJECT_ID
+ */
+app.get('/api/v1/data-products', async (req, res) => {
+  try {
+    const accessToken = req.headers.authorization?.split(' ')[1];
+
+    // The configured project list is read here, on the server, rather than being
+    // sent up by the browser as ?projectIds. The client used to derive it from
+    // appConfig, which meant a page whose config had not loaded yet sent nothing
+    // and silently fell back to a single project - a different list for the same
+    // action. The server already owns configData.json, so it is the only source.
+    //
+    // De-duplicated: a project repeated here was previously fetched twice and
+    // both results concatenated, listing its products twice.
+    let projectIds = [];
+    try {
+      const raw = await fs.readFile(dataFilePath, 'utf8');
+      const cfg = raw ? JSON.parse(raw) : {};
+      if (Array.isArray(cfg.projects)) {
+        projectIds = [...new Set(cfg.projects.map(id => String(id).trim()).filter(Boolean))];
+      }
+    } catch (err) {
+      console.error('Could not read configData.json for data-products:', err.message);
+    }
+
+    // No configured projects means "no restriction". Today that still resolves to
+    // the deployment's own project; widening it to every project the caller can
+    // access is a separate decision (it changes the fan-out size materially).
+    if (!projectIds.length) {
+      projectIds = [req.query.projectId || process.env.GOOGLE_CLOUD_PROJECT_ID];
+    }
+
+    if (!projectIds.length || !projectIds[0]) {
+      return res.status(500).json({ message: 'Server Configuration Error: GOOGLE_CLOUD_PROJECT_ID must be set in the .env file.' });
+    }
+
+    const bearerToken = await getRequestAccessToken(accessToken);
+
+    // Fetch data products for each project in parallel and merge results.
+    const results = await Promise.all(
+      projectIds.map(pid =>
+        axios.get(`https://dataplex.googleapis.com/v1/projects/${pid}/locations/-/dataProducts`, {
+          headers: { Authorization: `Bearer ${bearerToken}`, 'Content-Type': 'application/json' },
+        })
+        .then(r => r.data.dataProducts || [])
+        .catch(err => {
+          console.warn(`Error fetching data products for project ${pid}:`, err?.response?.data || err.message);
+          return [];
+        })
+      )
+    );
+
+    res.json({ dataProducts: results.flat() });
+  } catch (error) {
+    console.error('Error listing data products', error?.response?.data || error);
+    const err = error?.response?.data?.error || error;
+    return checkErrorAndSendResponse(res, err, 'An error occurred while listing data products.');
+  }
+});
+
+/**
+ * GET /api/v1/data-product-details
+ * Looks up the full Dataplex entry for a data product. Proxies the Dataplex
+ * `:lookupEntry` REST API.
+ *
+ * Query params:
+ *   project  - project id of the data product
+ *   location - location of the data product
+ *   entry    - fully-qualified entry name to look up
+ */
+app.get('/api/v1/data-product-details', async (req, res) => {
+  try {
+    const { project, location, entry } = req.query;
+    const accessToken = req.headers.authorization?.split(' ')[1];
+
+    if (!project || !location || !entry) {
+      return res.status(400).json({ message: 'Bad Request: "project", "location" and "entry" query params are required.' });
+    }
+
+    const bearerToken = await getRequestAccessToken(accessToken);
+    const url = `https://dataplex.googleapis.com/v1/projects/${project}/locations/${location}:lookupEntry`;
+
+    const response = await axios.get(url, {
+      params: { entry, view: 'ALL' },
+      headers: { Authorization: `Bearer ${bearerToken}`, 'Content-Type': 'application/json' },
+    });
+
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error fetching data product details', error?.response?.data || error);
+    const err = error?.response?.data?.error || error;
+    return checkErrorAndSendResponse(res, err, 'An error occurred while fetching data product details.');
+  }
+});
+
+/**
+ * GET /api/v1/data-product-assets
+ * Lists the data assets that belong to a data product. Proxies the Dataplex
+ * `dataAssets` REST API.
+ *
+ * Query params:
+ *   dataProduct - data product resource path
+ *                 (projects/{p}/locations/{l}/dataProducts/{id})
+ */
+app.get('/api/v1/data-product-assets', async (req, res) => {
+  try {
+    const { dataProduct } = req.query;
+    const accessToken = req.headers.authorization?.split(' ')[1];
+
+    if (!dataProduct) {
+      return res.status(400).json({ message: 'Bad Request: A "dataProduct" query param is required.' });
+    }
+
+    const bearerToken = await getRequestAccessToken(accessToken);
+    const url = `https://dataplex.googleapis.com/v1/${dataProduct}/dataAssets`;
+
+    const response = await axios.get(url, {
+      headers: { Authorization: `Bearer ${bearerToken}`, 'Content-Type': 'application/json' },
+    });
+
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error listing data product assets', error?.response?.data || error);
+    const err = error?.response?.data?.error || error;
+    return checkErrorAndSendResponse(res, err, 'An error occurred while listing data product assets.');
+  }
+});
+
+/**
+ * GET /api/v1/glossary-children
+ * Lists the categories and terms directly under a glossary/category. Proxies
+ * the Dataplex `{parent}/categories` and `{parent}/terms` REST APIs.
+ *
+ * Query params:
+ *   parent - glossary/category resource path
+ *            (projects/{p}/locations/{l}/glossaries/{g}[/categories/{c}])
+ */
+app.get('/api/v1/glossary-children', async (req, res) => {
+  try {
+    const { parent } = req.query;
+    const accessToken = req.headers.authorization?.split(' ')[1];
+
+    if (!parent) {
+      return res.status(400).json({ message: 'Bad Request: A "parent" query param is required.' });
+    }
+
+    const bearerToken = await getRequestAccessToken(accessToken);
+    const headers = { Authorization: `Bearer ${bearerToken}`, 'Content-Type': 'application/json' };
+
+    // An explicit 403 is the ONLY thing that means "you cannot read this glossary".
+    // An empty result does not: a glossary with no categories and no terms is a
+    // perfectly normal, readable glossary. Nor does a single failing leg - if terms
+    // are readable but categories are denied, the glossary is still readable.
+    //
+    // This distinction matters because the client marks search matches as locked,
+    // and it previously had to *infer* that from absence - locking items the user
+    // could actually open.
+    //
+    // Each leg also follows nextPageToken to completion. Dataplex's
+    // categories.list/terms.list paginate by default (previously this took
+    // only the first page, so a glossary with more categories or terms than
+    // one page fit in silently lost the rest - with no signal to the client
+    // that anything was missing).
+    const fetchLeg = async (path, key) => {
+      let items = [];
+      let pageToken;
+      do {
+        try {
+          const { data } = await axios.get(
+            `https://dataplex.googleapis.com/v1/${parent}/${path}`,
+            { headers, params: { pageSize: 1000, ...(pageToken ? { pageToken } : {}) } }
+          );
+          items = items.concat(data[key] || []);
+          pageToken = data.nextPageToken;
+        } catch (err) {
+          // A failure on the very first page (nothing fetched yet) is the only
+          // case that can mean "denied" - a later page failing mid-pagination
+          // still means access was already proven, so keep what was fetched
+          // and just stop rather than discarding it.
+          return { forbidden: items.length === 0 && err?.response?.status === 403, data: items };
+        }
+      } while (pageToken);
+      return { forbidden: false, data: items };
+    };
+
+    const [categoriesRes, termsRes] = await Promise.all([
+      fetchLeg('categories', 'categories'),
+      fetchLeg('terms', 'terms'),
+    ]);
+
+    // Only when BOTH legs are explicitly denied do we report the glossary itself
+    // as inaccessible. Every other failure still degrades to an empty list, as
+    // before (surfacing those is tracked separately).
+    if (categoriesRes.forbidden && termsRes.forbidden) {
+      return res.status(403).json({
+        error: 'Permission Denied: You do not have access to this glossary.',
+        details: `Listing categories and terms was denied for ${parent}.`,
+      });
+    }
+
+    res.json({
+      categories: categoriesRes.data,
+      terms: termsRes.data,
+    });
+  } catch (error) {
+    console.error('Error fetching glossary children', error?.response?.data || error);
+    const err = error?.response?.data?.error || error;
+    return checkErrorAndSendResponse(res, err, 'An error occurred while fetching glossary children.');
+  }
+});
+
+/**
+ * GET /api/v1/lookup-entry-rest
+ * Looks up a full Knowledge Catalog entry. Proxies the Dataplex `:lookupEntry`
+ * REST API.
+ *
+ * Query params:
+ *   project  - project id in whose location scope to look up
+ *   location - location scope
+ *   entry    - fully-qualified entry name to look up
+ *   view     - optional entry view (defaults to ALL)
+ */
+app.get('/api/v1/lookup-entry-rest', async (req, res) => {
+  try {
+    const { project, location, entry, view } = req.query;
+    const accessToken = req.headers.authorization?.split(' ')[1];
+
+    if (!project || !location || !entry) {
+      return res.status(400).json({ message: 'Bad Request: "project", "location" and "entry" query params are required.' });
+    }
+
+    const bearerToken = await getRequestAccessToken(accessToken);
+    const url = `https://dataplex.googleapis.com/v1/projects/${project}/locations/${location}:lookupEntry`;
+
+    const response = await axios.get(url, {
+      params: { entry, view: view || 'ALL' },
+      headers: { Authorization: `Bearer ${bearerToken}`, 'Content-Type': 'application/json' },
+    });
+
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error looking up entry', error?.response?.data || error);
+    const err = error?.response?.data?.error || error;
+    return checkErrorAndSendResponse(res, err, 'An error occurred while looking up the entry.');
+  }
+});
+
+/**
+ * POST /api/v1/search-entries
+ * Searches Knowledge Catalog entries. Proxies the Dataplex `:searchEntries`
+ * REST API.
+ *
+ * Body:
+ *   project  - optional project id (defaults to GOOGLE_CLOUD_PROJECT_ID)
+ *   location - optional location scope (defaults to "global")
+ *   ...rest  - forwarded as the searchEntries request body (query, pageSize, orderBy, pageToken, ...)
+ */
+app.post('/api/v1/search-entries', async (req, res) => {
+  try {
+    const { project, location, ...searchBody } = req.body || {};
+    const accessToken = req.headers.authorization?.split(' ')[1];
+    const proj = project || process.env.GOOGLE_CLOUD_PROJECT_ID;
+    const loc = location || 'global';
+
+    if (!proj) {
+      return res.status(500).json({ message: 'Server Configuration Error: GOOGLE_CLOUD_PROJECT_ID must be set in the .env file.' });
+    }
+    if (!searchBody.query) {
+      return res.status(400).json({ message: 'Bad Request: A "query" field is required.' });
+    }
+
+    const bearerToken = await getRequestAccessToken(accessToken);
+    const url = `https://dataplex.googleapis.com/v1/projects/${proj}/locations/${loc}:searchEntries`;
+
+    const response = await axios.post(url, searchBody, {
+      headers: { Authorization: `Bearer ${bearerToken}`, 'Content-Type': 'application/json' },
+    });
+
+    res.json(response.data);
+  } catch (error) {
+    console.error('Error searching entries', error?.response?.data || error);
+    const err = error?.response?.data?.error || error;
+    return checkErrorAndSendResponse(res, err, 'An error occurred while searching entries.');
+  }
+});
+
 app.get('/api/v1/get-sample-data', async (req, res) => {
   try {
 
@@ -761,13 +1119,16 @@ app.get('/api/v1/get-sample-data', async (req, res) => {
         return checkErrorAndSendResponse(res, error, 'fqn is required');
     }
 
-    // const oauth2Client = new CustomGoogleAuth(accessToken);
-    const oauth2Client = new OAuth2Client();
-    oauth2Client.setCredentials({ access_token: accessToken });
-    const bigquery = new BigQuery({
-        authClient: oauth2Client,
-        projectId: fqn.split(':')[1].split('.')[0],
-    });
+    const projectId = fqn.split(':')[1].split('.')[0];
+    let bigquery;
+    if (isServiceAccountMode()) {
+        // Service account (ADC) — no caller token needed.
+        bigquery = new BigQuery({ projectId });
+    } else {
+        const oauth2Client = new OAuth2Client();
+        oauth2Client.setCredentials({ access_token: accessToken });
+        bigquery = new BigQuery({ authClient: oauth2Client, projectId });
+    }
 
     const rows = await querySampleFromBigQuery(bigquery, fqn.split(':')[1], 10);
 
@@ -798,7 +1159,7 @@ app.post('/api/v1/lineage', async (req, res) => {
   try {
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexLineageClientv1 = new LineageClient({
         auth: oauth2Client,
@@ -880,7 +1241,7 @@ app.post('/api/v1/lineage-downstream', async (req, res) => {
   try {
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexLineageClientv1 = new LineageClient({
         auth: oauth2Client,
@@ -915,7 +1276,7 @@ app.post('/api/v1/lineage-upstream', async (req, res) => {
   try {
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexLineageClientv1 = new LineageClient({
         auth: oauth2Client,
@@ -950,7 +1311,7 @@ app.post('/api/v1/lineage-processes', async (req, res) => {
   try {
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexLineageClientv1 = new LineageClient({
         auth: oauth2Client,
@@ -982,7 +1343,7 @@ app.post('/api/v1/get-process-and-job-details', async (req, res) => {
   try {
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexLineageClientv1 = new LineageClient({
         auth: oauth2Client,
@@ -1126,7 +1487,7 @@ app.post('/api/v1/lineage-column-level', async (req, res) => {
   try {
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexClinetv1 = new CatalogServiceClient({
         auth: oauth2Client,
@@ -1301,7 +1662,7 @@ app.get('/api/v1/projects', async (req, res) => {
     console.log('Listing all accessible GCP projects.');
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const resourceManagerClient = new ProjectsClient({
         auth: oauth2Client,
@@ -1336,7 +1697,7 @@ app.get('/api/v1/tag-templates', async (req, res) => {
     console.log(`Listing tag templates for parent: ${parent}`);
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataCatalogClientv1 = new DataCatalogClient({
         auth: oauth2Client,
@@ -1364,7 +1725,7 @@ app.post('/api/v1/get-aspect-detail', async (req, res) => {
     try {
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexClientv1 = new CatalogServiceClient({
         auth: oauth2Client,
@@ -1387,7 +1748,7 @@ app.get('/api/v1/app-configs', async (req, res) => {
     const location = process.env.GCP_LOCATION;
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const dataplexClientv1 = new CatalogServiceClient({
         auth: oauth2Client,
@@ -1409,8 +1770,9 @@ app.get('/api/v1/app-configs', async (req, res) => {
       // The name of the project and location to search within
       name: parent,
       query: aspectQuery,
-      pageSize:999, // Limit the number of results returned
-      pageToken:'',
+      // Page size only, not a cap: auto-pagination stays ON below so the list is
+      // complete. Set high purely to cut round trips, mirroring /get-projects.
+      pageSize:999,
     };
 
     
@@ -1418,24 +1780,93 @@ app.get('/api/v1/app-configs', async (req, res) => {
     let configData = {};
     try{
       const [aspectsList, projectList, currentProject, defaultConfigData] = await Promise.all([
-          dataplexClientv1.searchEntries(request, { autoPaginate: false}),
+          // Auto-pagination left ON: with it off only the first page was read and
+          // nextPageToken was discarded, so the aspect list was silently truncated
+          // at a server-chosen boundary - and since the query has no orderBy, which
+          // aspects survived differed between calls.
+          dataplexClientv1.searchEntries(request),
           resourceManagerClientv1.searchProjects({pageSize:2000}, { autoPaginate: false}),
           resourceManagerClientv1.getProject({ name: `projects/${projectId}` }),
           fs.readFile(dataFilePath, 'utf8') || {}
       ]);
       aspects = aspectsList[0] || [];
+      configData = defaultConfigData ? JSON.parse(defaultConfigData) : {};
       let p = projectList[0] ? projectList[0].filter(pr => pr.projectId !== projectId) : [];
       projects = [ currentProject[0], ...p];
-      configData = defaultConfigData ? JSON.parse(defaultConfigData) : {};
     } catch(err){
       console.error('Error listing projects for app config:', err);
     }
 
-    const reduceAspect = ({ name, fullyQualifiedName, entrySource, entryType }) => ({ name, fullyQualifiedName, entrySource, entryType });
+    // Resolve the admin-configured project IDs to their project numbers.
+    // The UI scopes aspects by matching `projects/{number}`, and deriving those
+    // numbers from the full project list is fragile: that list can be truncated
+    // or partially fetched, and an unresolved project silently HIDES aspects.
+    // This set is admin-sized (a handful), so resolve it directly — it is then
+    // always complete, or explicitly flagged as not.
+    const configuredProjectIds = configData.projects || [];
+    const configuredProjects = [];
+    let configuredProjectsComplete = true;
+
+    if (configuredProjectIds.length > 0) {
+      const resolved = await Promise.allSettled(
+        configuredProjectIds.map((id) =>
+          resourceManagerClientv1.getProject({ name: `projects/${id}` })
+        )
+      );
+
+      // One retry for whichever calls failed - absorbs a transient blip (rate
+      // limit, brief 5xx) instead of permanently flagging
+      // configuredProjectsComplete false for the rest of the session over
+      // something that would have succeeded a moment later. A persistently
+      // failing id still correctly ends up incomplete below.
+      const failedIndexes = resolved
+        .map((r, i) => (r.status === 'rejected' ? i : -1))
+        .filter((i) => i !== -1);
+      if (failedIndexes.length > 0) {
+        const retried = await Promise.allSettled(
+          failedIndexes.map((i) =>
+            resourceManagerClientv1.getProject({ name: `projects/${configuredProjectIds[i]}` })
+          )
+        );
+        failedIndexes.forEach((i, j) => { resolved[i] = retried[j]; });
+      }
+
+      resolved.forEach((result, i) => {
+        const project = result.status === 'fulfilled' ? result.value?.[0] : null;
+        const projectNumber = (project?.name || '').split('/')[1] || '';
+        if (projectNumber) {
+          configuredProjects.push({
+            projectId: project.projectId || configuredProjectIds[i],
+            projectNumber,
+          });
+        } else {
+          // Flag rather than silently returning a short list: the client must
+          // know not to filter on an incomplete set.
+          configuredProjectsComplete = false;
+          console.error(
+            `Could not resolve configured project ${configuredProjectIds[i]}:`,
+            result.reason?.message || result.reason
+          );
+        }
+      });
+    }
+
+    // Guarded against a malformed entry - without this, one bad aspect in the
+    // response fails the whole /app-configs call (500), which blocks the
+    // entire app's bootstrap (Glossaries, Browse by Aspect, project scoping
+    // all wait on this endpoint).
+    const reduceAspect = (dataplexEntry) => {
+      const e = dataplexEntry || {};
+      return { name: e.name, fullyQualifiedName: e.fullyQualifiedName, entrySource: e.entrySource, entryType: e.entryType };
+    };
 
     const configs = {
-        aspects: aspects.map(({ dataplexEntry }) => ({ dataplexEntry:reduceAspect(dataplexEntry) })),
+        aspects: aspects.map((a) => ({ dataplexEntry: reduceAspect(a?.dataplexEntry) })),
         projects: projects.map(({ projectId, name, displayName }) => ({ projectId, name, displayName })),
+        projectsRestricted: !!(configData.projects && configData.projects.length > 0),
+        configuredProjectIds: configData.projects || [],
+        configuredProjects,
+        configuredProjectsComplete,
         defaultSearchProduct: configData.products || 'All',
         defaultSearchAssets: configData.assets || '',
         browseByAspectTypes: configData.aspectType || []
@@ -1559,7 +1990,7 @@ app.get('/api/v1/get-projects', async (req, res) => {
     const location = process.env.GCP_LOCATION;
     const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-    const oauth2Client = new CustomGoogleAuth(accessToken);
+    const oauth2Client = getAuthClient(accessToken);
 
     const resourceManagerClientv1 = new ProjectsClient({
         auth: oauth2Client,
@@ -1569,13 +2000,25 @@ app.get('/api/v1/get-projects', async (req, res) => {
         return res.status(500).json({ message: 'Server Configuration Error: GOOGLE_CLOUD_PROJECT_ID and GCP_LOCATION must be set in the .env file.' });
     }
     
-    let projects = [];
-    try{
-      const [ projectList ] = await resourceManagerClientv1.searchProjects();
-      projects = projectList || [];
-    } catch(err){
-      console.error('Error listing projects for app config:', err);
-    }
+    // The configured project is fetched explicitly and pinned first, mirroring
+    // /app-configs: searchProjects does not always surface it, and this list is
+    // the single source the UI uses to map project numbers to project ids.
+    //
+    // pageSize is set explicitly (auto-pagination stays ON, so the list is still
+    // complete) purely to cut round trips: the server default is ~300/page, so a
+    // 40k-project org needs 130+ dependent calls instead of ~40.
+    //
+    // Deliberately NOT wrapped in a swallow-and-continue try/catch: returning
+    // HTTP 200 with a partial or empty array is indistinguishable from "this org
+    // has no projects", and the client uses this list to decide what to show.
+    // A failure must surface as a failure.
+    const [ projectList, currentProject ] = await Promise.all([
+      resourceManagerClientv1.searchProjects({ pageSize: 1000 }),
+      resourceManagerClientv1.getProject({ name: `projects/${projectId}` }),
+    ]);
+    const rest = projectList[0] ? projectList[0].filter(pr => pr.projectId !== projectId) : [];
+    const projects = currentProject && currentProject[0] ? [ currentProject[0], ...rest ] : rest;
+
     res.json(projects.map(({ projectId, name, displayName }) => ({ projectId, name, displayName })));
 
   } catch (error) {
@@ -1603,7 +2046,7 @@ app.get('/api/v1/data-scans', async (req, res) => {
 
         const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-        const oauth2Client = new CustomGoogleAuth(accessToken);
+        const oauth2Client = getAuthClient(accessToken);
 
         const dataplexDataScanClientv1 = new DataScanServiceClient({
             auth: oauth2Client,
@@ -1642,7 +2085,7 @@ app.get('/api/v1/data-quality-scan-jobs/:scanId', async (req, res) => {
 
         const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-        const oauth2Client = new CustomGoogleAuth(accessToken);
+        const oauth2Client = getAuthClient(accessToken);
 
         const dataplexDataScanClientv1 = new DataScanServiceClient({
             auth: oauth2Client,
@@ -1682,7 +2125,7 @@ app.get('/api/v1/get-data-scan-jobs', async (req, res) => {
 
         const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-        const oauth2Client = new CustomGoogleAuth(accessToken);
+        const oauth2Client = getAuthClient(accessToken);
 
         const dataplexDataScanClientv1 = new DataScanServiceClient({
             auth: oauth2Client,
@@ -1691,11 +2134,12 @@ app.get('/api/v1/get-data-scan-jobs', async (req, res) => {
         // The listDataScanJobs method returns recent jobs. The result of each job contains the quality metrics.
         const [jobs] = await dataplexDataScanClientv1.listDataScanJobs({ parent: parent });
 
+        const bearerToken = await getRequestAccessToken(accessToken);
         for (const job of jobs) {
             //const [jobDetails] = await dataplexDataScanClientv1.getDataScanJob({ name: job.name, view:'FULL' });
             const jobDetails = await axios.get(`https://dataplex.googleapis.com/v1/${job.name}?view=FULL`, {
                 headers: {
-                    'Authorization': `Bearer ${accessToken}`,
+                    'Authorization': `Bearer ${bearerToken}`,
                     'Content-Type': 'application/json'
                 }
             });
@@ -1731,7 +2175,7 @@ app.post('/api/v1/entry-data-quality', async (req, res) => {
 
         const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-        const oauth2Client = new CustomGoogleAuth(accessToken);
+        const oauth2Client = getAuthClient(accessToken);
 
         const dataplexDataScanClientv1 = new DataScanServiceClient({
             auth: oauth2Client,
@@ -1785,7 +2229,7 @@ app.get('/api/v1/get-data-scan', async (req, res) => {
 
         const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-        const oauth2Client = new CustomGoogleAuth(accessToken);
+        const oauth2Client = getAuthClient(accessToken);
 
         const dataplexDataScanClientv1 = new DataScanServiceClient({
             auth: oauth2Client,
@@ -1827,7 +2271,7 @@ app.post('/api/v1/get-jobs-scan', async (req, res) => {
 
         const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-        const oauth2Client = new CustomGoogleAuth(accessToken);
+        const oauth2Client = getAuthClient(accessToken);
 
         const dataplexDataScanClientv1 = new DataScanServiceClient({
             auth: oauth2Client,
@@ -1863,7 +2307,7 @@ app.post('/api/batch-data-quality-scan-jobs', async (req, res) => {
     try {
         const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-        const oauth2Client = new CustomGoogleAuth(accessToken);
+        const oauth2Client = getAuthClient(accessToken);
 
         const dataplexDataScanClientv1 = new DataScanServiceClient({
             auth: oauth2Client,
@@ -1901,7 +2345,7 @@ app.post('/api/v1/get-dataset-entries', async (req, res) => {
     try {
         const accessToken = req.headers.authorization?.split(' ')[1]; // Expect
 
-        const oauth2Client = new CustomGoogleAuth(accessToken);
+        const oauth2Client = getAuthClient(accessToken);
 
         const dataplexCatalogClientv1 = new CatalogServiceClient({
             auth: oauth2Client,
@@ -2108,1185 +2552,8 @@ app.get('/api/access-request/health', (req, res) => {
   });
 });
 
-/**
- * GET /api/v1/rc18/bigquery/datasets
- * Returns list of BigQuery datasets in the GCP project.
- */
-app.get('/api/v1/rc18/bigquery/datasets', async (req, res) => {
-  try {
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || 'your-project-id';
-    const bigquery = new BigQuery({ projectId });
-    let [datasets] = await bigquery.getDatasets();
-    let datasetList = (datasets || []).map(d => ({
-      id: d.id,
-      location: d.metadata?.location || 'us-central1'
-    }));
-
-    // Ensure governance dataset is present
-    if (!datasetList.some(d => d.id === 'governance')) {
-      datasetList.unshift({ id: 'governance', location: 'us-central1' });
-    }
-    if (!datasetList.some(d => d.id === 'your_demo_dataset')) {
-      datasetList.push({ id: 'your_demo_dataset', location: 'us-central1' });
-    }
-
-    return res.json({ success: true, datasets: datasetList });
-  } catch (err) {
-    console.warn('[RC18] BigQuery datasets fetch warning:', err.message);
-    return res.json({
-      success: true,
-      datasets: [
-        { id: 'governance', location: 'us-central1' },
-        { id: 'your_demo_dataset', location: 'us-central1' },
-        { id: 'silver_banking', location: 'us-central1' }
-      ]
-    });
-  }
-});
-
-/**
- * GET /api/v1/rc18/bigquery/datasets/:datasetId/tables
- * Returns list of tables in a specific BigQuery dataset.
- */
-app.get('/api/v1/rc18/bigquery/datasets/:datasetId/tables', async (req, res) => {
-  try {
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID || 'your-project-id';
-    const { datasetId } = req.params;
-    const bigquery = new BigQuery({ projectId });
-    const dataset = bigquery.dataset(datasetId);
-    let [tables] = await dataset.getTables();
-    let tableList = (tables || []).map(t => ({
-      id: t.id,
-      type: t.metadata?.type || 'TABLE'
-    }));
-
-    if (datasetId === 'governance' && !tableList.some(t => t.id === 'dq_results')) {
-      tableList.unshift({ id: 'dq_results', type: 'TABLE' });
-    }
-    if (tableList.length === 0) {
-      if (datasetId === 'governance') {
-        tableList = [{ id: 'dq_results', type: 'TABLE' }];
-      } else if (datasetId.includes('Summit')) {
-        tableList = [{ id: 'transacao_cartao', type: 'TABLE' }];
-      } else {
-        tableList = [
-          { id: 'silver_clientes_v2', type: 'TABLE' },
-          { id: 'silver_contratos_portabilidade_v2', type: 'TABLE' }
-        ];
-      }
-    }
-
-    return res.json({ success: true, tables: tableList });
-  } catch (err) {
-    console.warn(`[RC18] BigQuery tables fetch warning for ${req.params.datasetId}:`, err.message);
-    let defaultTables = req.params.datasetId === 'governance'
-      ? [{ id: 'dq_results', type: 'TABLE' }]
-      : [{ id: 'transacao_cartao', type: 'TABLE' }, { id: 'silver_clientes_v2', type: 'TABLE' }];
-    return res.json({ success: true, tables: defaultTables });
-  }
-});
-
-function getSampleDqResultsRows(projectId, datasetId, tableId) {
-  const pId = projectId || getGcpProjectId();
-  const pNum = process.env.GOOGLE_CLOUD_PROJECT_NUMBER || pId;
-  return [
-    {
-      data_quality_scan: {
-        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-cadastro-cliente`,
-        project_id: pId,
-        location: "us-central1",
-        data_scan_id: "dq-cadastro-cliente",
-        display_name: "dq-cadastro-cliente"
-      },
-      data_source: {
-        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/cadastro_cliente/tables/dados_cadastrais`,
-        dataset_id: "cadastro_cliente",
-        table_id: "dados_cadastrais"
-      },
-      data_quality_job_id: "44ad6ce3-c5bd-48fa-916d-d21308aeaf91",
-      job_start_time: "2026-07-27 08:03:04.000000 UTC",
-      job_end_time: "2026-07-27 08:03:36.000000 UTC",
-      job_quality_result: { passed: "true", score: "100.0" },
-      job_rows_scanned: "48920",
-      rule_name: "Validação de Formato e Dígitos do CPF",
-      rule_description: "Acurácia do formato de CPF conforme padrão da Receita Federal / BACEN",
-      rule_type: "Regex check",
-      rule_column: "cpf",
-      rule_dimension: "ACCURACY",
-      rule_passed: "true",
-      rule_rows_evaluated: "48920",
-      rule_rows_passed: "48920",
-      rule_rows_passed_percent: "100.0",
-      rule_failed_records_query: "",
-      last_updated: "2026-07-27 08:03:36.000000 UTC"
-    },
-    {
-      data_quality_scan: {
-        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-cadastro-cliente`,
-        project_id: pId,
-        location: "us-central1",
-        data_scan_id: "dq-cadastro-cliente",
-        display_name: "dq-cadastro-cliente"
-      },
-      data_source: {
-        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/cadastro_cliente/tables/dados_cadastrais`,
-        dataset_id: "cadastro_cliente",
-        table_id: "dados_cadastrais"
-      },
-      data_quality_job_id: "44ad6ce3-c5bd-48fa-916d-d21308aeaf91",
-      job_start_time: "2026-07-27 08:03:04.000000 UTC",
-      job_end_time: "2026-07-27 08:03:36.000000 UTC",
-      job_quality_result: { passed: "true", score: "100.0" },
-      job_rows_scanned: "48920",
-      rule_name: "Completude de Nome Completo e CPF",
-      rule_description: "Checagem de ausência de nulos em identificadores cadastrais",
-      rule_type: "NULL check",
-      rule_column: "nome_completo",
-      rule_dimension: "COMPLETENESS",
-      rule_passed: "true",
-      rule_rows_evaluated: "48920",
-      rule_rows_passed: "48920",
-      rule_rows_passed_percent: "100.0",
-      rule_failed_records_query: "",
-      last_updated: "2026-07-27 08:03:36.000000 UTC"
-    },
-    {
-      data_quality_scan: {
-        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-transacao-cartao`,
-        project_id: pId,
-        location: "us-central1",
-        data_scan_id: "dq-transacao-cartao",
-        display_name: "dq-transacao-cartao"
-      },
-      data_source: {
-        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/transacoes_cartao/tables/fatura_cartao`,
-        dataset_id: "transacoes_cartao",
-        table_id: "fatura_cartao"
-      },
-      data_quality_job_id: "2a1557dd-2b07-4d2d-af02-a944500a8398",
-      job_start_time: "2026-07-23 14:18:49.000000 UTC",
-      job_end_time: "2026-07-23 14:19:17.000000 UTC",
-      job_quality_result: { passed: "false", score: "95.449997" },
-      job_rows_scanned: "128500",
-      rule_name: "Unicidade de Identificador de Transação (NSU)",
-      rule_description: "Verificação de unicidade no atributo nsu_transacao",
-      rule_type: "Uniqueness check",
-      rule_column: "nsu_transacao",
-      rule_dimension: "UNIQUENESS",
-      rule_passed: "false",
-      rule_rows_evaluated: "128500",
-      rule_rows_passed: "128430",
-      rule_rows_passed_percent: "99.945",
-      rule_failed_records_query: `SELECT nsu_transacao, COUNT(1) FROM \`${pId}.transacoes_cartao.fatura_cartao\` GROUP BY nsu_transacao HAVING COUNT(1) > 1;`,
-      last_updated: "2026-07-23 14:18:17.000000 UTC"
-    },
-    {
-      data_quality_scan: {
-        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-transacao-cartao`,
-        project_id: pId,
-        location: "us-central1",
-        data_scan_id: "dq-transacao-cartao",
-        display_name: "dq-transacao-cartao"
-      },
-      data_source: {
-        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/transacoes_cartao/tables/fatura_cartao`,
-        dataset_id: "transacoes_cartao",
-        table_id: "fatura_cartao"
-      },
-      data_quality_job_id: "2a1557dd-2b07-4d2d-af02-a944500a8398",
-      job_start_time: "2026-07-23 14:18:49.000000 UTC",
-      job_end_time: "2026-07-23 14:19:17.000000 UTC",
-      job_quality_result: { passed: "true", score: "100.0" },
-      job_rows_scanned: "128500",
-      rule_name: "Completude de Data/Hora e Estabelecimento",
-      rule_description: "Completude de data_hora_transacao sem valores nulos",
-      rule_type: "NULL check",
-      rule_column: "data_hora_transacao",
-      rule_dimension: "COMPLETENESS",
-      rule_passed: "true",
-      rule_rows_evaluated: "128500",
-      rule_rows_passed: "128500",
-      rule_rows_passed_percent: "100.0",
-      rule_failed_records_query: "",
-      last_updated: "2026-07-23 14:18:17.000000 UTC"
-    },
-    {
-      data_quality_scan: {
-        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-transacao-cartao`,
-        project_id: pId,
-        location: "us-central1",
-        data_scan_id: "dq-transacao-cartao",
-        display_name: "dq-transacao-cartao"
-      },
-      data_source: {
-        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/transacoes_cartao/tables/fatura_cartao`,
-        dataset_id: "transacoes_cartao",
-        table_id: "fatura_cartao"
-      },
-      data_quality_job_id: "2a1557dd-2b07-4d2d-af02-a944500a8398",
-      job_start_time: "2026-07-23 14:18:49.000000 UTC",
-      job_end_time: "2026-07-23 14:19:17.000000 UTC",
-      job_quality_result: { passed: "true", score: "100.0" },
-      job_rows_scanned: "128500",
-      rule_name: "Validação de Valor Positivo de Transação (> 0)",
-      rule_description: "Acurácia do valor_transacao (> 0)",
-      rule_type: "Range check",
-      rule_column: "valor_transacao",
-      rule_dimension: "ACCURACY",
-      rule_passed: "true",
-      rule_rows_evaluated: "128500",
-      rule_rows_passed: "128500",
-      rule_rows_passed_percent: "100.0",
-      rule_failed_records_query: "",
-      last_updated: "2026-07-23 14:18:17.000000 UTC"
-    },
-    {
-      data_quality_scan: {
-        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-contas-correntes`,
-        project_id: pId,
-        location: "us-central1",
-        data_scan_id: "dq-contas-correntes",
-        display_name: "dq-contas-correntes"
-      },
-      data_source: {
-        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/contas_correntes/tables/saldos_extratos`,
-        dataset_id: "contas_correntes",
-        table_id: "saldos_extratos"
-      },
-      data_quality_job_id: "3b1557dd-2b07-4d2d-af02-a944500a9999",
-      job_start_time: "2026-07-23 14:18:49.000000 UTC",
-      job_end_time: "2026-07-23 14:19:17.000000 UTC",
-      job_quality_result: { passed: "true", score: "99.8" },
-      job_rows_scanned: "94300",
-      rule_name: "Integridade de Saldo Consistente com Lançamentos",
-      rule_description: "Consistência contábil entre saldo final e somatório de débitos/créditos (BACEN 18)",
-      rule_type: "SQL check",
-      rule_column: "saldo_disponivel",
-      rule_dimension: "CONSISTENCY",
-      rule_passed: "true",
-      rule_rows_evaluated: "94300",
-      rule_rows_passed: "94210",
-      rule_rows_passed_percent: "99.9",
-      rule_failed_records_query: "",
-      last_updated: "2026-07-23 14:18:17.000000 UTC"
-    },
-    {
-      data_quality_scan: {
-        resource_name: `//dataplex.googleapis.com/projects/${pNum}/locations/us-central1/dataScans/dq-contrato-credito`,
-        project_id: pId,
-        location: "us-central1",
-        data_scan_id: "dq-contrato-credito",
-        display_name: "dq-contrato-credito"
-      },
-      data_source: {
-        resource_name: `//bigquery.googleapis.com/projects/${pId}/datasets/contrato_credito/tables/operacoes_ativas`,
-        dataset_id: "contrato_credito",
-        table_id: "operacoes_ativas"
-      },
-      data_quality_job_id: "5c1557dd-2b07-4d2d-af02-a944500a8888",
-      job_start_time: "2026-07-23 14:18:49.000000 UTC",
-      job_end_time: "2026-07-23 14:19:17.000000 UTC",
-      job_quality_result: { passed: "true", score: "98.5" },
-      job_rows_scanned: "15200",
-      rule_name: "Taxa de Juros Dentro dos Limites Regulatórios do BACEN",
-      rule_description: "Acurácia da taxa_juros_anual em conformidade com as regras do Banco Central",
-      rule_type: "Range check",
-      rule_column: "taxa_juros_anual",
-      rule_dimension: "ACCURACY",
-      rule_passed: "true",
-      rule_rows_evaluated: "15200",
-      rule_rows_passed: "15200",
-      rule_rows_passed_percent: "100.0",
-      rule_failed_records_query: "",
-      last_updated: "2026-07-23 14:18:17.000000 UTC"
-    }
-  ];
-}
-
-/**
- * GET /api/v1/rc18/data-quality-dimensions
- * Queries selected BigQuery DQ export table (e.g. governance.dq_results) and returns results in 3 dimensions:
- * - Dimensão 1: Acurácia (Accuracy)
- * - Dimensão 2: Completude (Completeness)
- * - Dimensão 3: Consistência (Consistency)
- */
-app.get('/api/v1/rc18/data-quality-dimensions', async (req, res) => {
-  try {
-    const projectId = getGcpProjectId();
-    const location = (req.query.location || req.headers['x-gcp-region'] || 'us-central1').toString();
-    const dqResultsDataset = (req.query.dataset || 'dataplex').toString();
-    const dqResultsTable = (req.query.table || 'datascans').toString();
-
-    console.log(`[RC18] Querying Data Quality scans via Knowledge Catalog API (Dataplex) for project ${projectId} in ${location}`);
-
-    let bqRows = [];
-    let allScansFound = [];
-    try {
-      const dataScanClient = new DataScanServiceClient();
-      const parent = `projects/${projectId}/locations/${location}`;
-      const [scans] = await dataScanClient.listDataScans({ parent, view: 'FULL' });
-      allScansFound = scans || [];
-      console.log(`[RC18] Dataplex API returned ${allScansFound.length} total scans in ${location}`);
-      
-      for (const scan of allScansFound) {
-        // Only process Data Quality scans
-        if (scan.type !== 'DATA_QUALITY' && !scan.dataQualitySpec && !scan.dataQualityResult) continue;
-        
-        let sourceDataset = 'N/A';
-        let sourceTable = 'N/A';
-        const resourceStr = (scan.data && scan.data.resource) 
-          ? scan.data.resource 
-          : (scan.executionSpec?.data?.resource || scan.data?.entity || '');
-        
-        let match = resourceStr.match(/datasets\/([^\/]+)\/tables\/([^\/]+)/);
-        if (match) {
-          sourceDataset = match[1];
-          sourceTable = match[2];
-        } else {
-          const dotMatch = resourceStr.match(/(?:[a-zA-Z0-9_\-]+[:\.])?([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]+)$/);
-          if (dotMatch) {
-            sourceDataset = dotMatch[1];
-            sourceTable = dotMatch[2];
-          } else if (scan.data?.entity) {
-            const entityMatch = scan.data.entity.match(/entities\/([^\/]+)/);
-            if (entityMatch) {
-              sourceTable = entityMatch[1];
-              sourceDataset = 'dataplex_lake';
-            }
-          }
-        }
-
-        if (sourceTable === 'N/A' || !sourceTable) {
-          const scanIdPart = (scan.name ? scan.name.split('/').pop() : '').replace(/^dq-/, '');
-          if (scanIdPart) {
-            sourceTable = scanIdPart.replace(/-/g, '_');
-            sourceDataset = 'bigquery_dataset';
-          }
-        }
-
-        const scanId = scan.name ? scan.name.split('/').pop() : (scan.displayName || 'dq-scan');
-        const jobPassed = scan.dataQualityResult ? scan.dataQualityResult.passed : true;
-        const jobScore = scan.dataQualityResult?.score !== undefined ? (scan.dataQualityResult.score * 100) : 100.0;
-        let jobTimeStr = new Date().toISOString();
-        if (scan.updateTime && scan.updateTime.seconds) {
-           jobTimeStr = new Date(scan.updateTime.seconds * 1000).toISOString();
-        }
-
-        // Case 1: Scan has executed with dataQualityResult.rules
-        if (scan.dataQualityResult && Array.isArray(scan.dataQualityResult.rules) && scan.dataQualityResult.rules.length > 0) {
-          for (const item of scan.dataQualityResult.rules) {
-            const ruleObj = item.rule || {};
-            const isPassed = item.passed !== false;
-            const evaluated = Number(item.evaluatedCount || Math.max(Number(scan.dataQualityResult.rowCount || 0), 1000));
-            const passedCount = Number(item.passedCount || (isPassed ? evaluated : Math.round(evaluated * 0.95)));
-            const passPct = item.passRatio !== undefined ? Math.round(item.passRatio * 10000) / 100 : (isPassed ? 100.0 : 95.0);
-            
-            let ruleDim = ruleObj.dimension || 'ACCURACY';
-            const ruleType = ruleObj.description || ruleObj.name || (ruleObj.nonNullExpectation ? 'NULL check' : (ruleObj.uniquenessExpectation ? 'Uniqueness check' : (ruleObj.regexExpectation ? 'Regex check' : 'Dataplex Rule')));
-            const colName = ruleObj.column || 'Tabela Geral';
-            
-            bqRows.push({
-              data_source: { resource_name: resourceStr, dataset_id: sourceDataset, table_id: sourceTable },
-              data_quality_scan: { data_scan_id: scanId },
-              job_quality_result: { passed: jobPassed, score: jobScore },
-              rule_name: ruleObj.name || `${ruleType} (${colName})`,
-              rule_description: ruleObj.description || `Validação na coluna ${colName}`,
-              rule_dimension: ruleDim,
-              rule_type: ruleType,
-              rule_column: colName,
-              rule_passed: isPassed,
-              rule_rows_evaluated: evaluated.toString(),
-              rule_rows_passed: passedCount.toString(),
-              rule_rows_passed_percent: passPct.toString(),
-              last_updated: jobTimeStr,
-              rule_failed_records_query: item.failingRowsQuery || ''
-            });
-          }
-        } 
-        // Case 2: Scan is defined in dataQualitySpec.rules
-        else if (scan.dataQualitySpec && Array.isArray(scan.dataQualitySpec.rules) && scan.dataQualitySpec.rules.length > 0) {
-          for (const ruleObj of scan.dataQualitySpec.rules) {
-            const colName = ruleObj.column || 'Tabela Geral';
-            const ruleDim = ruleObj.dimension || (ruleObj.uniquenessExpectation ? 'UNIQUENESS' : (ruleObj.nonNullExpectation ? 'COMPLETENESS' : 'ACCURACY'));
-            const ruleType = ruleObj.nonNullExpectation ? 'NULL check' : (ruleObj.uniquenessExpectation ? 'Uniqueness check' : (ruleObj.regexExpectation ? 'Regex check' : (ruleObj.rangeExpectation ? 'Range check' : 'Dataplex Rule')));
-            const ruleName = ruleObj.name || `${ruleType} (${colName})`;
-            
-            bqRows.push({
-              data_source: { resource_name: resourceStr, dataset_id: sourceDataset, table_id: sourceTable },
-              data_quality_scan: { data_scan_id: scanId },
-              job_quality_result: { passed: true, score: 100.0 },
-              rule_name: ruleName,
-              rule_description: `Regra Dataplex em ${sourceDataset}.${sourceTable} (${colName})`,
-              rule_dimension: ruleDim,
-              rule_type: ruleType,
-              rule_column: colName,
-              rule_passed: true,
-              rule_rows_evaluated: "10000",
-              rule_rows_passed: "10000",
-              rule_rows_passed_percent: "100.0",
-              last_updated: jobTimeStr,
-              rule_failed_records_query: ''
-            });
-          }
-        }
-      }
-    } catch (apiErr) {
-      console.warn(`[RC18] Warning: Dataplex DataScans API query failed (${apiErr.message}). Using sample DQ results.`);
-    }
-
-    if (bqRows.length === 0) {
-      bqRows = getSampleDqResultsRows(projectId, 'Summit_demo', 'transacao_cartao');
-    }
-
-    const filteredRows = bqRows;
-
-    let accuracyRules = [];
-    let completenessRules = [];
-    let consistencyRules = [];
-    let scannedSourceTables = new Set();
-
-    for (const row of filteredRows) {
-      const dsInfo = row.data_source || {};
-      const resName = typeof dsInfo.resource_name === 'string' ? dsInfo.resource_name : '';
-      let sourceTable = (dsInfo.table_id && dsInfo.table_id !== 'N/A') ? dsInfo.table_id : ((resName.match(/tables\/([^\/]+)/)?.[1]) || 'tabela_financeira');
-      let sourceDataset = (dsInfo.dataset_id && dsInfo.dataset_id !== 'N/A') ? dsInfo.dataset_id : ((resName.match(/datasets\/([^\/]+)/)?.[1]) || (sourceTable.includes('cartao') ? 'transacoes_cartao' : (sourceTable.includes('cliente') ? 'cadastro_cliente' : 'financeiro')));
-      
-      if (sourceDataset !== 'N/A' && sourceTable !== 'N/A') {
-        scannedSourceTables.add(`${sourceDataset}.${sourceTable}`);
-      }
-
-      const ruleDim = (row.rule_dimension || '').toUpperCase();
-      const ruleType = row.rule_type || '';
-      const colName = row.rule_column || 'Tabela Geral';
-      const isPassed = String(row.rule_passed !== undefined && row.rule_passed !== null && row.rule_passed !== '' ? row.rule_passed : (row.job_quality_result?.passed)).toLowerCase() === 'true';
-      const evaluated = Number(row.rule_rows_evaluated || row.job_rows_scanned || 0);
-      const passed = Number(row.rule_rows_passed !== undefined && row.rule_rows_passed !== null && row.rule_rows_passed !== '' ? row.rule_rows_passed : (isPassed ? evaluated : 0));
-      const failed = Math.max(0, evaluated - passed);
-      const passPct = row.rule_rows_passed_percent !== undefined && row.rule_rows_passed_percent !== null && row.rule_rows_passed_percent !== '' ? parseFloat(row.rule_rows_passed_percent) : (row.job_quality_result?.score ? parseFloat(row.job_quality_result.score) : (evaluated > 0 ? Math.round((passed / evaluated) * 10000) / 100 : 100));
-      const ruleName = (row.rule_name && row.rule_name.trim() !== '') ? row.rule_name.trim() : `${ruleType || 'DQ Check'} (${colName})`;
-
-      const ruleItem = {
-        ruleName: ruleName,
-        column: colName,
-        table: sourceTable,
-        dataset: sourceDataset,
-        scanId: row.data_quality_scan?.data_scan_id || 'dq-scan',
-        passed: isPassed,
-        evaluatedCount: evaluated,
-        passedCount: passed,
-        failedCount: failed,
-        passPercentage: passPct,
-        dimension: ruleDim || 'ACCURACY',
-        ruleType: ruleType,
-        failedRecordsQuery: row.rule_failed_records_query || '',
-        executionTime: row.job_end_time || row.job_start_time || row.last_updated
-      };
-
-      if (ruleDim === 'COMPLETENESS' || ruleType.includes('NULL')) {
-        completenessRules.push(ruleItem);
-      } else if (ruleDim === 'UNIQUENESS' || ruleDim === 'CONSISTENCY' || ruleType.includes('Uniqueness') || ruleType.includes('SQL')) {
-        consistencyRules.push(ruleItem);
-      } else {
-        accuracyRules.push(ruleItem);
-      }
-    }
-
-    const calcScore = (rules) => {
-      if (rules.length === 0) return 100.0;
-      const totalEvaluated = rules.reduce((acc, r) => acc + (r.evaluatedCount || 1), 0);
-      const totalPassed = rules.reduce((acc, r) => acc + (r.passedCount || (r.passed ? 1 : 0)), 0);
-      return Math.round((totalPassed / Math.max(totalEvaluated, 1)) * 10000) / 100;
-    };
-
-    const accuracyScore = calcScore(accuracyRules);
-    const completenessScore = calcScore(completenessRules);
-    const consistencyScore = calcScore(consistencyRules);
-
-    // Calculate consolidated summary per audited table
-    const tableSummaryMap = {};
-    const allRulesCombined = [...accuracyRules, ...completenessRules, ...consistencyRules];
-
-    for (const r of allRulesCombined) {
-      const key = `${r.dataset}.${r.table}`;
-      if (!tableSummaryMap[key]) {
-        tableSummaryMap[key] = {
-          dataset: r.dataset,
-          table: r.table,
-          fullTableName: key,
-          totalRules: 0,
-          passedRules: 0,
-          failedRules: 0,
-          accuracyRules: [],
-          completenessRules: [],
-          consistencyRules: [],
-          lastExecutionTime: r.executionTime
-        };
-      }
-      tableSummaryMap[key].totalRules += 1;
-      if (r.passed) {
-        tableSummaryMap[key].passedRules += 1;
-      } else {
-        tableSummaryMap[key].failedRules += 1;
-      }
-
-      if (r.dimension === 'COMPLETENESS' || r.ruleType.includes('NULL')) {
-        tableSummaryMap[key].completenessRules.push(r);
-      } else if (r.dimension === 'UNIQUENESS' || r.dimension === 'CONSISTENCY' || r.ruleType.includes('Uniqueness') || r.ruleType.includes('SQL')) {
-        tableSummaryMap[key].consistencyRules.push(r);
-      } else {
-        tableSummaryMap[key].accuracyRules.push(r);
-      }
-    }
-
-    const tableSummaries = Object.values(tableSummaryMap).map(ts => {
-      const accScore = calcScore(ts.accuracyRules);
-      const compScore = calcScore(ts.completenessRules);
-      const consScore = calcScore(ts.consistencyRules);
-      const overallScore = calcScore([...ts.accuracyRules, ...ts.completenessRules, ...ts.consistencyRules]);
-      
-      let status = 'Conforme';
-      if (ts.failedRules > 0 && overallScore >= 90) {
-        status = 'Atenção';
-      } else if (overallScore < 90) {
-        status = 'Crítico';
-      }
-
-      return {
-        dataset: ts.dataset,
-        table: ts.table,
-        fullTableName: ts.fullTableName,
-        totalRules: ts.totalRules,
-        passedRules: ts.passedRules,
-        failedRules: ts.failedRules,
-        accuracyScore: accScore,
-        completenessScore: compScore,
-        consistencyScore: consScore,
-        overallScore: overallScore,
-        lastExecutionTime: ts.lastExecutionTime,
-        status: status
-      };
-    });
-
-    const centralizedCatalogContext = await Promise.all(tableSummaries.map(async (ts) => {
-      const linkedResource = `//bigquery.googleapis.com/projects/${projectId}/datasets/${ts.dataset}/tables/${ts.table}`;
-      let catalogDisplayName = `${ts.dataset}.${ts.table}`;
-      let entryGroup = `@bigquery`;
-      let governanceDomain = ts.dataset.toUpperCase();
-      let aspectTypes = ['schema', 'data_quality_aspect', 'governance_classification'];
-
-      try {
-        const catalogClient = new CatalogServiceClient();
-        const [entry] = await catalogClient.lookupEntry({ linkedResource });
-        if (entry) {
-          catalogDisplayName = entry.displayName || catalogDisplayName;
-          entryGroup = entry.name ? (entry.name.match(/entryGroups\/([^\/]+)/)?.[1] || entryGroup) : entryGroup;
-          if (entry.aspects) {
-            aspectTypes = Object.keys(entry.aspects);
-          }
-        }
-      } catch (err) {
-        // Fallback context if lookupEntry is not directly indexed
-      }
-
-      return {
-        entryId: `${ts.dataset}_${ts.table}`,
-        displayName: catalogDisplayName,
-        linkedResource: linkedResource,
-        entryGroup: entryGroup,
-        aspectTypes: aspectTypes,
-        governanceDomain: governanceDomain,
-        dataQualityScore: ts.overallScore,
-        complianceStatus: ts.status,
-        lastLookupTime: new Date().toISOString()
-      };
-    }));
-
-    res.json({
-      success: true,
-      timestamp: new Date().toISOString(),
-      dataset: dqResultsDataset,
-      table: dqResultsTable,
-      dimensions: {
-        accuracy: {
-          name: 'Acurácia',
-          group: 'Conteúdo & Exatidão',
-          scorePct: accuracyScore,
-          rulesEvaluated: accuracyRules.length,
-          rulesPassed: accuracyRules.filter(r => r.passed).length,
-          rules: accuracyRules,
-          productGcp: 'Dataplex Auto DQ',
-          description: 'Validação de limites numéricos, formatos e conformidade de regras de exatidão.'
-        },
-        completeness: {
-          name: 'Completude',
-          group: 'Conteúdo & Exatidão',
-          scorePct: completenessScore,
-          rulesEvaluated: completenessRules.length,
-          rulesPassed: completenessRules.filter(r => r.passed).length,
-          rules: completenessRules,
-          productGcp: 'Dataplex Auto DQ',
-          description: 'Verificação da ausência de valores nulos (NULL check) em atributos essenciais.'
-        },
-        consistency: {
-          name: 'Consistência',
-          group: 'Conteúdo & Exatidão',
-          scorePct: consistencyScore,
-          rulesEvaluated: consistencyRules.length,
-          rulesPassed: consistencyRules.filter(r => r.passed).length,
-          rules: consistencyRules,
-          productGcp: 'Dataplex Auto DQ / BigQuery',
-          description: 'Validação de unicidade e ausência de contradições de negócio entre dados.'
-        }
-      },
-      scannedSourceTables: Array.from(scannedSourceTables),
-      tableSummaries: tableSummaries,
-      centralizedCatalogContext: centralizedCatalogContext,
-      totalRulesEvaluated: bqRows.length
-    });
-  } catch (error) {
-    console.error('[RC18] Error fetching RC18 Data Quality dimensions:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch Dataplex Data Quality Scan dimensions for RC 18/2025',
-      error: error.message
-    });
-  }
-});
-
-/**
- * Helper to generate sample Cloud DLP findings and table risk profiles
- * with financial context (BACEN Resolution 18 & LGPD).
- */
-const getSampleDlpData = (projectId) => {
-  const findings = [
-    {
-      dataset: 'cadastro_cliente',
-      table: 'dados_cadastrais',
-      fullTableName: 'cadastro_cliente.dados_cadastrais',
-      column: 'cpf',
-      infoType: 'BRAZIL_CPF_NUMBER',
-      infoTypeDisplayName: 'CPF (Cadastro de Pessoas Físicas)',
-      category: 'PII Cadastral / Identificação',
-      likelihood: 'VERY_LIKELY',
-      estimatedOccurrences: 48920,
-      sensitivity: 'Alta',
-      policyTagApplied: true,
-      policyTagName: `projects/${projectId}/locations/us-central1/taxonomies/gov_tax/policyTags/cpf_masked`,
-      recommendation: 'Mascaramento dinâmico ativo via Policy Tag (Exibe apenas 3 primeiros dígitos).'
-    },
-    {
-      dataset: 'cadastro_cliente',
-      table: 'dados_cadastrais',
-      fullTableName: 'cadastro_cliente.dados_cadastrais',
-      column: 'nome_completo',
-      infoType: 'PERSON_NAME',
-      infoTypeDisplayName: 'Nome de Pessoa Física',
-      category: 'PII Cadastral / Identificação',
-      likelihood: 'VERY_LIKELY',
-      estimatedOccurrences: 48920,
-      sensitivity: 'Média',
-      policyTagApplied: false,
-      recommendation: 'Recomenda-se aplicar Policy Tag de controle de acesso restrito a operadores autorizados.'
-    },
-    {
-      dataset: 'cadastro_cliente',
-      table: 'dados_cadastrais',
-      fullTableName: 'cadastro_cliente.dados_cadastrais',
-      column: 'email',
-      infoType: 'EMAIL_ADDRESS',
-      infoTypeDisplayName: 'Endereço de E-mail',
-      category: 'Contato / Identificação',
-      likelihood: 'VERY_LIKELY',
-      estimatedOccurrences: 47850,
-      sensitivity: 'Média',
-      policyTagApplied: true,
-      policyTagName: `projects/${projectId}/locations/us-central1/taxonomies/gov_tax/policyTags/email_masked`,
-      recommendation: 'Mascaramento dinâmico ativo via SHA-256 / Policy Tag.'
-    },
-    {
-      dataset: 'cadastro_cliente',
-      table: 'dados_cadastrais',
-      fullTableName: 'cadastro_cliente.dados_cadastrais',
-      column: 'telefone_celular',
-      infoType: 'PHONE_NUMBER',
-      infoTypeDisplayName: 'Número de Telefone',
-      category: 'Contato / Identificação',
-      likelihood: 'LIKELY',
-      estimatedOccurrences: 46210,
-      sensitivity: 'Média',
-      policyTagApplied: false,
-      recommendation: 'Aplicar mascaramento parcial de dígitos finais (ex: (11) 98765-****).'
-    },
-    {
-      dataset: 'transacao_cartao',
-      table: 'fatura_cartao',
-      fullTableName: 'transacao_cartao.fatura_cartao',
-      column: 'numero_cartao',
-      infoType: 'CREDIT_CARD_NUMBER',
-      infoTypeDisplayName: 'Número de Cartão de Crédito (PAN)',
-      category: 'Sigilo Bancário / PCI-DSS',
-      likelihood: 'VERY_LIKELY',
-      estimatedOccurrences: 128500,
-      sensitivity: 'Alta',
-      policyTagApplied: true,
-      policyTagName: `projects/${projectId}/locations/us-central1/taxonomies/gov_tax/policyTags/pci_pan_masked`,
-      recommendation: 'Conforme PCI-DSS e BACEN 18: Armazenamento tokenizado e mascarado (Primeiros 6 e últimos 4 dígitos).'
-    },
-    {
-      dataset: 'transacao_cartao',
-      table: 'fatura_cartao',
-      fullTableName: 'transacao_cartao.fatura_cartao',
-      column: 'codigo_seguranca_cvv',
-      infoType: 'CREDIT_CARD_TRACK_NUMBER',
-      infoTypeDisplayName: 'CVV / Código de Verificação',
-      category: 'Sigilo Bancário / PCI-DSS',
-      likelihood: 'VERY_LIKELY',
-      estimatedOccurrences: 128500,
-      sensitivity: 'Alta',
-      policyTagApplied: true,
-      policyTagName: `projects/${projectId}/locations/us-central1/taxonomies/gov_tax/policyTags/cvv_restricted`,
-      recommendation: 'Conforme regulamentação: CVV nunca deve ser exposto em claro.'
-    },
-    {
-      dataset: 'contas_correntes',
-      table: 'saldos_extratos',
-      fullTableName: 'contas_correntes.saldos_extratos',
-      column: 'numero_conta',
-      infoType: 'BANK_ACCOUNT_NUMBER',
-      infoTypeDisplayName: 'Conta Bancária e Agência',
-      category: 'Sigilo Bancário (LC 105/2001)',
-      likelihood: 'VERY_LIKELY',
-      estimatedOccurrences: 94300,
-      sensitivity: 'Alta',
-      policyTagApplied: true,
-      policyTagName: `projects/${projectId}/locations/us-central1/taxonomies/gov_tax/policyTags/bank_account_masked`,
-      recommendation: 'Acesso auditado com restrição a perfis autorizados pelo DPO e Segurança da Informação.'
-    },
-    {
-      dataset: 'contas_correntes',
-      table: 'saldos_extratos',
-      fullTableName: 'contas_correntes.saldos_extratos',
-      column: 'chave_pix',
-      infoType: 'BRAZIL_CPF_NUMBER',
-      infoTypeDisplayName: 'Chave PIX (CPF / Telefone / Aleatória)',
-      category: 'Sigilo Bancário (LC 105/2001)',
-      likelihood: 'VERY_LIKELY',
-      estimatedOccurrences: 89100,
-      sensitivity: 'Alta',
-      policyTagApplied: false,
-      recommendation: 'Vincular Policy Tag de anonimização no BigQuery para cumprimento da Resolução BACEN 18.'
-    },
-    {
-      dataset: 'contrato_credito',
-      table: 'operacoes_ativas',
-      fullTableName: 'contrato_credito.operacoes_ativas',
-      column: 'cnpj_empresa',
-      infoType: 'BRAZIL_CNPJ_NUMBER',
-      infoTypeDisplayName: 'CNPJ (Cadastro Nacional da Pessoa Jurídica)',
-      category: 'Identificação Empresarial',
-      likelihood: 'VERY_LIKELY',
-      estimatedOccurrences: 15200,
-      sensitivity: 'Média',
-      policyTagApplied: true,
-      policyTagName: `projects/${projectId}/locations/us-central1/taxonomies/gov_tax/policyTags/cnpj_masked`,
-      recommendation: 'Exibição sob demanda com registro de trilha de auditoria.'
-    },
-    {
-      dataset: 'contrato_credito',
-      table: 'operacoes_ativas',
-      fullTableName: 'contrato_credito.operacoes_ativas',
-      column: 'cpf_avalista',
-      infoType: 'BRAZIL_CPF_NUMBER',
-      infoTypeDisplayName: 'CPF do Avalista / Garantidor',
-      category: 'PII Cadastral / Identificação',
-      likelihood: 'VERY_LIKELY',
-      estimatedOccurrences: 8900,
-      sensitivity: 'Alta',
-      policyTagApplied: false,
-      recommendation: 'Requer aplicação de Policy Tag antes do compartilhamento com áreas de negócio.'
-    }
-  ];
-
-  const infoTypeDistribution = [
-    { infoType: 'BRAZIL_CPF_NUMBER', displayName: 'CPF', count: 146920, category: 'PII Cadastral' },
-    { infoType: 'CREDIT_CARD_NUMBER', displayName: 'Cartão de Crédito (PAN)', count: 128500, category: 'Sigilo Bancário / PCI' },
-    { infoType: 'BANK_ACCOUNT_NUMBER', displayName: 'Conta / Agência Bancária', count: 94300, category: 'Sigilo Bancário (LC 105)' },
-    { infoType: 'PERSON_NAME', displayName: 'Nome Completo', count: 48920, category: 'PII Cadastral' },
-    { infoType: 'EMAIL_ADDRESS', displayName: 'E-mail', count: 47850, category: 'Contato / Identificação' },
-    { infoType: 'PHONE_NUMBER', displayName: 'Telefone', count: 46210, category: 'Contato / Identificação' },
-    { infoType: 'BRAZIL_CNPJ_NUMBER', displayName: 'CNPJ', count: 15200, category: 'Empresarial' }
-  ];
-
-  const tableRiskMap = {};
-  for (const f of findings) {
-    if (!tableRiskMap[f.fullTableName]) {
-      tableRiskMap[f.fullTableName] = {
-        dataset: f.dataset,
-        table: f.table,
-        fullTableName: f.fullTableName,
-        totalSensitiveColumns: 0,
-        highSensitivityColumns: 0,
-        policyTagsAppliedCount: 0,
-        detectedInfoTypes: new Set(),
-        categories: new Set()
-      };
-    }
-    tableRiskMap[f.fullTableName].totalSensitiveColumns += 1;
-    if (f.sensitivity === 'Alta') tableRiskMap[f.fullTableName].highSensitivityColumns += 1;
-    if (f.policyTagApplied) tableRiskMap[f.fullTableName].policyTagsAppliedCount += 1;
-    tableRiskMap[f.fullTableName].detectedInfoTypes.add(f.infoTypeDisplayName);
-    tableRiskMap[f.fullTableName].categories.add(f.category);
-  }
-
-  const tableRiskProfiles = Object.values(tableRiskMap).map(t => {
-    const coveragePct = Math.round((t.policyTagsAppliedCount / Math.max(t.totalSensitiveColumns, 1)) * 100);
-    let status = 'Adequado';
-    let riskLevel = 'Baixo';
-    if (coveragePct < 60 && t.highSensitivityColumns > 0) {
-      status = 'Crítico - Exposição de Sigilo';
-      riskLevel = 'Alto';
-    } else if (coveragePct < 100) {
-      status = 'Requer Mascaramento';
-      riskLevel = 'Médio';
-    }
-
-    return {
-      dataset: t.dataset,
-      table: t.table,
-      fullTableName: t.fullTableName,
-      totalSensitiveColumns: t.totalSensitiveColumns,
-      highSensitivityColumns: t.highSensitivityColumns,
-      detectedInfoTypes: Array.from(t.detectedInfoTypes),
-      categories: Array.from(t.categories),
-      maskingCoveragePct: coveragePct,
-      complianceStatus: status,
-      riskLevel: riskLevel
-    };
-  });
-
-  const protectedCount = findings.filter(f => f.policyTagApplied).length;
-  const highRiskCount = tableRiskProfiles.filter(t => t.riskLevel === 'Alto').length;
-
-  return {
-    summary: {
-      totalTablesScanned: tableRiskProfiles.length,
-      tablesWithSensitiveData: tableRiskProfiles.length,
-      totalPiiFieldsDetected: findings.length,
-      bankingSecrecyFields: findings.filter(f => f.category.includes('Sigilo') || f.category.includes('PCI')).length,
-      highSensitivityFieldsCount: findings.filter(f => f.sensitivity === 'Alta').length,
-      protectedWithPolicyTagsCount: protectedCount,
-      overallProtectionCoveragePct: Math.round((protectedCount / findings.length) * 100),
-      highRiskTablesCount: highRiskCount,
-      complianceLevel: highRiskCount === 0 ? 'Conforme' : 'Atenção Regulatória (BACEN 18 / LGPD)'
-    },
-    infoTypeDistribution,
-    findings,
-    tableRiskProfiles
-  };
-};
-
-/**
- * GET /api/v1/rc18/dlp-sensitive-data
- * Queries Cloud Sensitive Data Protection (DLP) API to identify PII, Banking Secrecy,
- * and data privacy risks in accordance with BACEN Resolution 18 and LGPD.
- */
-app.get('/api/v1/rc18/dlp-sensitive-data', async (req, res) => {
-  try {
-    const projectId = getGcpProjectId();
-    const location = (req.query.location || req.headers['x-gcp-region'] || 'us-central1').toString();
-    console.log(`[RC18-DLP] Querying Cloud Sensitive Data Protection for project ${projectId} in ${location}`);
-
-    let dlpResult = null;
-    try {
-      const dlpClient = new DlpServiceClient();
-      const parent = `projects/${projectId}/locations/${location}`;
-      const [profiles] = await dlpClient.listTableDataProfiles({ parent });
-      
-      if (profiles && profiles.length > 0) {
-        // Parse real DLP profiles if available
-        const findings = [];
-        const tableRiskMap = {};
-
-        for (const p of profiles) {
-          const tableName = p.fullResource || p.name || 'tabela_analisada';
-          const match = tableName.match(/datasets\/([^\/]+)\/tables\/([^\/]+)/);
-          const ds = match ? match[1] : 'dataset';
-          const tbl = match ? match[2] : 'table';
-          const fullTbl = `${ds}.${tbl}`;
-
-          if (p.predictedInfoTypes) {
-            for (const it of p.predictedInfoTypes) {
-              const itName = it.infoType?.name || 'SENSITIVE_DATA';
-              const isHigh = itName.includes('CPF') || itName.includes('CARD') || itName.includes('ACCOUNT') || itName.includes('BANK');
-              findings.push({
-                dataset: ds,
-                table: tbl,
-                fullTableName: fullTbl,
-                column: 'detectado_em_tabela',
-                infoType: itName,
-                infoTypeDisplayName: itName.replace(/_/g, ' '),
-                category: isHigh ? 'Sigilo Bancário / PII Crítico' : 'Dados Gerais',
-                likelihood: 'VERY_LIKELY',
-                estimatedOccurrences: Number(p.rowCount || 1000),
-                sensitivity: isHigh ? 'Alta' : 'Média',
-                policyTagApplied: false,
-                recommendation: 'Aplicar classificação e mascaramento dinâmico no Knowledge Catalog.'
-              });
-            }
-          }
-        }
-
-        if (findings.length > 0) {
-          dlpResult = {
-            summary: {
-              totalTablesScanned: profiles.length,
-              tablesWithSensitiveData: profiles.length,
-              totalPiiFieldsDetected: findings.length,
-              bankingSecrecyFields: findings.filter(f => f.sensitivity === 'Alta').length,
-              highSensitivityFieldsCount: findings.filter(f => f.sensitivity === 'Alta').length,
-              protectedWithPolicyTagsCount: 0,
-              overallProtectionCoveragePct: 0,
-              highRiskTablesCount: profiles.length,
-              complianceLevel: 'Atenção Regulatória (BACEN 18 / LGPD)'
-            },
-            findings,
-            tableRiskProfiles: []
-          };
-        }
-      }
-    } catch (dlpErr) {
-      console.warn(`[RC18-DLP] Warning: DLP query failed (${dlpErr.message}). Using sample financial findings.`);
-    }
-
-    if (!dlpResult) {
-      dlpResult = getSampleDlpData(projectId);
-    }
-
-    res.json({
-      success: true,
-      timestamp: new Date().toISOString(),
-      location: location,
-      ...dlpResult
-    });
-  } catch (error) {
-    console.error('[RC18-DLP] Error fetching DLP Sensitive Data:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch DLP sensitive data findings',
-      error: error.message
-    });
-  }
-});
-
-/**
- * Helper to generate sample Data Lineage & Pipeline Traceability graph
- * with financial context (BACEN Resolution 18 Art. 8 & Data Lineage API).
- */
-const getSampleLineageData = (projectId) => {
-  const pId = projectId || getGcpProjectId();
-  
-  const nodes = [
-    // Source Systems (Origens)
-    { id: 'src_core_banking', label: 'Core Banking (CDC / Datastream)', type: 'source', layer: 'Origem', system: 'Core Banking Engine', icon: 'Storage' },
-    { id: 'src_card_gateway', label: 'Gateway de Cartões (PubSub/Dataflow)', type: 'source', layer: 'Origem', system: 'Payment Switch', icon: 'CloudQueue' },
-    { id: 'src_crm_salesforce', label: 'CRM & Onboarding (API / GCS)', type: 'source', layer: 'Origem', system: 'CRM Salesforce', icon: 'AccountTree' },
-    { id: 'src_open_finance', label: 'Open Finance APIs (Inbound)', type: 'source', layer: 'Origem', system: 'Open Finance Gateway', icon: 'Hub' },
-
-    // Transformation Pipelines (Processos de ETL / Dataform / SQL)
-    { id: 'proc_dataform_cards', label: 'Dataform: transacoes_curated.sqlx', type: 'process', engine: 'Dataform (BigQuery)', schedule: 'A cada 15 min', script: 'TRUNCATE & INSERT com validação de NSU e mascaramento de PAN' },
-    { id: 'proc_spark_dedup', label: 'Dataproc: clientes_dedup.py', type: 'process', engine: 'Dataproc Serverless (Spark)', schedule: 'Diário (02:00)', script: 'Deduplicação de CPF e enriquecimento de dados cadastrais' },
-    { id: 'proc_bq_contas', label: 'BigQuery: conciliacao_saldos.sql', type: 'process', engine: 'BigQuery Scheduled Query', schedule: 'A cada 1 hora', script: 'Conciliação de saldos e lançamentos contábeis' },
-    { id: 'proc_dataform_credito', label: 'Dataform: operacoes_credito_basileia.sqlx', type: 'process', engine: 'Dataform (BigQuery)', schedule: 'Diário (04:00)', script: 'Cálculo de provisões e PDD conforme Resolução CMN 2.682' },
-
-    // BigQuery Curated Tables (Tabelas Auditadas)
-    { id: 'tbl_transacao_cartao', label: 'Summit_demo.transacao_cartao', type: 'table', dataset: 'Summit_demo', table: 'transacao_cartao', rows: '54.893', sensitivity: 'Alta (Sigilo/PCI)', qualityScore: 98.8 },
-    { id: 'tbl_cadastro_cliente', label: 'Summit_demo.cadastro_cliente', type: 'table', dataset: 'Summit_demo', table: 'cadastro_cliente', rows: '9.907', sensitivity: 'Alta (LGPD/CPF)', qualityScore: 100.0 },
-    { id: 'tbl_contas_correntes', label: 'contas_correntes.saldos_extratos', type: 'table', dataset: 'contas_correntes', table: 'saldos_extratos', rows: '94.300', sensitivity: 'Alta (Sigilo Bancário)', qualityScore: 99.8 },
-    { id: 'tbl_contrato_credito', label: 'contrato_credito.operacoes_ativas', type: 'table', dataset: 'contrato_credito', table: 'operacoes_ativas', rows: '15.200', sensitivity: 'Alta (Risco de Crédito)', qualityScore: 98.5 },
-    { id: 'tbl_vendas_cliente', label: 'kc_demo.vendas_por_cliente', type: 'table', dataset: 'kc_demo', table: 'vendas_por_cliente', rows: '12.450', sensitivity: 'Média', qualityScore: 100.0 },
-
-    // Regulatory Targets / Consumo BACEN (Destinos Regulatórios)
-    { id: 'tgt_cadoc_3040', label: 'BACEN CADOC 3040 (SCR - Risco de Crédito)', type: 'target', regulatoryEntity: 'Banco Central do Brasil', deadline: 'Mensal (D+10)', frequency: 'Mensal' },
-    { id: 'tgt_dlo_basileia', label: 'BACEN DLO (Demonstrativo de Limites Operacionais)', type: 'target', regulatoryEntity: 'Banco Central do Brasil', deadline: 'Trimestral', frequency: 'Trimestral' },
-    { id: 'tgt_drl_liquidez', label: 'BACEN DRL (Demonstrativo de Risco de Liquidez)', type: 'target', regulatoryEntity: 'Banco Central do Brasil', deadline: 'Diário (D+1)', frequency: 'Diário' },
-    { id: 'tgt_pld_ft', label: 'COAF / BACEN - Prevenção à Lavagem de Dinheiro (PLD/FT)', type: 'target', regulatoryEntity: 'COAF / BACEN', deadline: 'Tempo Real / Diário', frequency: 'Contínuo' },
-    { id: 'tgt_open_finance_out', label: 'Open Finance Brasil (Consentimento do Cliente)', type: 'target', regulatoryEntity: 'Open Finance Brasil', deadline: 'Tempo Real', frequency: 'APIs Rest' }
-  ];
-
-  const edges = [
-    // Sources -> Processes
-    { source: 'src_card_gateway', target: 'proc_dataform_cards', label: 'Streaming Ingestion' },
-    { source: 'src_crm_salesforce', target: 'proc_spark_dedup', label: 'Batch ETL' },
-    { source: 'src_core_banking', target: 'proc_bq_contas', label: 'CDC Replication' },
-    { source: 'src_open_finance', target: 'proc_dataform_credito', label: 'Inbound Open Data' },
-
-    // Processes -> Tables
-    { source: 'proc_dataform_cards', target: 'tbl_transacao_cartao', label: 'Carga Curated' },
-    { source: 'proc_spark_dedup', target: 'tbl_cadastro_cliente', label: 'Carga Enriquecida' },
-    { source: 'proc_bq_contas', target: 'tbl_contas_correntes', label: 'Carga Saldos' },
-    { source: 'proc_dataform_credito', target: 'tbl_contrato_credito', label: 'Carga Contratos' },
-    { source: 'tbl_cadastro_cliente', target: 'tbl_vendas_cliente', label: 'Join Analítico' },
-
-    // Tables -> Regulatory Targets
-    { source: 'tbl_transacao_cartao', target: 'tgt_pld_ft', label: 'Detecção de Atipicidade' },
-    { source: 'tbl_transacao_cartao', target: 'tgt_drl_liquidez', label: 'Fluxo de Caixa' },
-    { source: 'tbl_cadastro_cliente', target: 'tgt_cadoc_3040', label: 'Identificação Cliente' },
-    { source: 'tbl_contrato_credito', target: 'tgt_cadoc_3040', label: 'Operações de Crédito' },
-    { source: 'tbl_contrato_credito', target: 'tgt_dlo_basileia', label: 'Exposição Ponderada pelo Risco' },
-    { source: 'tbl_contas_correntes', target: 'tgt_drl_liquidez', label: 'Saldos Disponíveis' },
-    { source: 'tbl_cadastro_cliente', target: 'tgt_open_finance_out', label: 'Compartilhamento de Dados' }
-  ];
-
-  const pipelineDetails = [
-    {
-      table: 'Summit_demo.transacao_cartao',
-      sourceSystem: 'Gateway de Cartões (Payment Switch)',
-      ingestionType: 'Eventos em Tempo Real (Pub/Sub)',
-      transformationEngine: 'Dataform (BigQuery SQLX)',
-      pipelineName: 'dataform_pipeline.transacoes_curated.sqlx',
-      lastRunTime: '2026-08-07 14:30:00 UTC',
-      regulatoryTargets: ['COAF / BACEN (PLD/FT)', 'BACEN DRL (Risco de Liquidez)'],
-      traceabilityStatus: '100% Conforme',
-      hasBrokenLinks: false,
-      columnLineageCount: 14,
-      complianceNote: 'Linhagem ponta a ponta auditada do switch de pagamento ao relatório PLD/FT'
-    },
-    {
-      table: 'Summit_demo.cadastro_cliente',
-      sourceSystem: 'CRM Salesforce & Onboarding Digital',
-      ingestionType: 'Batch Diário via GCS Bucket',
-      transformationEngine: 'Dataproc Serverless (Spark)',
-      pipelineName: 'dataproc_spark_job.clientes_dedup.py',
-      lastRunTime: '2026-08-07 02:00:15 UTC',
-      regulatoryTargets: ['BACEN CADOC 3040 (SCR)', 'Open Finance Brasil'],
-      traceabilityStatus: '100% Conforme',
-      hasBrokenLinks: false,
-      columnLineageCount: 18,
-      complianceNote: 'Rastreabilidade de deduplicação de CPF validada conforme Art. 8º da Resolução 18'
-    },
-    {
-      table: 'contas_correntes.saldos_extratos',
-      sourceSystem: 'Core Banking Engine (CDC / Datastream)',
-      ingestionType: 'CDC Contínuo no BigQuery',
-      transformationEngine: 'BigQuery Scheduled Query',
-      pipelineName: 'bigquery_sql_scheduled.conciliacao_saldos.sql',
-      lastRunTime: '2026-08-07 15:00:00 UTC',
-      regulatoryTargets: ['BACEN DRL (Demonstrativo de Risco de Liquidez)'],
-      traceabilityStatus: '100% Conforme',
-      hasBrokenLinks: false,
-      columnLineageCount: 12,
-      complianceNote: 'Conciliação contábil rastreável com registros de log de auditoria'
-    },
-    {
-      table: 'contrato_credito.operacoes_ativas',
-      sourceSystem: 'Mesa de Crédito & Open Finance Inbound',
-      ingestionType: 'API Rest + Batch Noturno',
-      transformationEngine: 'Dataform (BigQuery SQLX)',
-      pipelineName: 'dataform_pipeline.operacoes_credito_basileia.sqlx',
-      lastRunTime: '2026-08-07 04:00:00 UTC',
-      regulatoryTargets: ['BACEN CADOC 3040 (SCR)', 'BACEN DLO (Basileia III)'],
-      traceabilityStatus: '100% Conforme',
-      hasBrokenLinks: false,
-      columnLineageCount: 22,
-      complianceNote: 'Cadeia de custódia completa de cálculo de risco e provisões (CMN 2.682)'
-    },
-    {
-      table: 'kc_demo.vendas_por_cliente',
-      sourceSystem: 'Tabela Summit_demo.cadastro_cliente',
-      ingestionType: 'Transformação Interna',
-      transformationEngine: 'BigQuery View / SQL',
-      pipelineName: 'bigquery.views.vendas_por_cliente',
-      lastRunTime: '2026-08-07 12:00:00 UTC',
-      regulatoryTargets: ['Painel Gerencial / Analytics Interno'],
-      traceabilityStatus: '100% Conforme',
-      hasBrokenLinks: false,
-      columnLineageCount: 8,
-      complianceNote: 'Visão derivada de dados cadastrais curados'
-    }
-  ];
-
-  return {
-    summary: {
-      totalTablesAudited: 5,
-      fullyTraceableTablesCount: 5,
-      partialTraceableTablesCount: 0,
-      traceabilityCoveragePct: 100.0,
-      totalTransformationPipelines: 5,
-      regulatoryReportsMapped: 5,
-      activeSourcesCount: 4,
-      complianceLevel: '100% Conforme (Art. 8º da Resolução BACEN 18/2025)'
-    },
-    nodes,
-    edges,
-    pipelineDetails
-  };
-};
-
-/**
- * GET /api/v1/rc18/lineage-traceability
- * Queries Data Lineage API and maps end-to-end data lifecycle
- * for BACEN Resolution 18 Article 8 compliance.
- */
-app.get('/api/v1/rc18/lineage-traceability', async (req, res) => {
-  try {
-    const projectId = getGcpProjectId();
-    const location = (req.query.location || req.headers['x-gcp-region'] || 'us-central1').toString();
-    console.log(`[RC18-Lineage] Querying Data Lineage API for project ${projectId} in ${location}`);
-
-    let lineageData = null;
-    try {
-      const dataplexLineageClient = new LineageClient();
-      const parent = `projects/${projectId}/locations/${location}`;
-      
-      // Attempt to search real lineage processes and links
-      const [processes] = await dataplexLineageClient.listProcesses({ parent, pageSize: 50 });
-      console.log(`[RC18-Lineage] Found ${processes?.length || 0} active lineage processes in GCP`);
-
-      if (processes && processes.length > 0) {
-        // Build lineage from real Google Cloud Lineage API
-        const nodes = [];
-        const edges = [];
-        const pipelineDetails = [];
-
-        for (const proc of processes) {
-          const procId = proc.name ? proc.name.split('/').pop() : 'process';
-          const displayName = proc.displayName || procId;
-          const origin = proc.origin || {};
-          const sourceSystem = origin.sourceType || 'BigQuery Job / Dataform';
-          
-          nodes.push({
-            id: procId,
-            label: displayName,
-            type: 'process',
-            engine: sourceSystem,
-            schedule: 'Ativo',
-            script: origin.name || displayName
-          });
-        }
-      }
-    } catch (lineageErr) {
-      console.warn(`[RC18-Lineage] Data Lineage API query notice (${lineageErr.message}). Using enriched regulatory lineage models.`);
-    }
-
-    if (!lineageData) {
-      lineageData = getSampleLineageData(projectId);
-    }
-
-    res.json({
-      success: true,
-      timestamp: new Date().toISOString(),
-      location: location,
-      ...lineageData
-    });
-  } catch (error) {
-    console.error('[RC18-Lineage] Error fetching Lineage Traceability:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to fetch Data Lineage Traceability for RC 18/2025',
-      error: error.message
-    });
-  }
-});
+// Mount Plug-and-Play BACEN RC 18/2025 & LGPD Governance Routes (Knowledge Catalog, DLP, Lineage)
+app.use('/api/v1/rc18', createRc18Router({ getAuthClient, getRequestAccessToken, dataFilePath }));
 
 // Basic health check endpoint
 app.get('/api/health', (req, res) => {
@@ -3297,7 +2564,7 @@ app.get('/', (req, res) => {
     res.redirect('/home'); // Redirects to the /home route
 });
 
-// For any other routes, serve the React index.html with no-cache headers
+// For any other routes, serve the React index.html with no-cache headers (Express 5 compatible)
 app.use((req, res) => {
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');

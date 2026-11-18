@@ -173,13 +173,20 @@ vi.mock('../../utils/resourceUtils', () => ({
     if (segments.length >= 2 && segments[0] === 'projects') return segments[1];
     return '';
   }),
-  resolveProjectDisplayName: vi.fn(() => '')
+  resolveProjectDisplayName: vi.fn(() => ''),
+  resolveProjectDisplayNameOrFallback: vi.fn(() => '')
 }));
 
 // Mock Redux slice
 vi.mock('../../features/entry/entrySlice', () => ({
   fetchEntry: vi.fn((args) => ({ type: 'fetchEntry', payload: args })),
   clearHistory: vi.fn(() => ({ type: 'entry/clearHistory' })),
+}));
+
+// Mock feature flags so the "Request Access" tests don't depend on
+// VITE_FEATURE_REQUEST_ACCESS / .env.test being present in the environment.
+vi.mock('../../utils/featureFlags', () => ({
+  FEATURE_FLAGS: { enableRequestAccess: true },
 }));
 
 // Mock MUI icons
@@ -452,7 +459,9 @@ describe('ResourcePreview', () => {
       const viewDetailsButton = screen.getByText('View Details');
       fireEvent.click(viewDetailsButton);
 
-      expect(mockNavigate).toHaveBeenCalledWith('/view-details');
+      expect(mockNavigate).toHaveBeenCalledWith(
+        `/view-details?entry=${encodeURIComponent(btoa(mockPreviewData.name))}`
+      );
     });
 
     it('does not navigate when viewDetailAccessable is false', () => {

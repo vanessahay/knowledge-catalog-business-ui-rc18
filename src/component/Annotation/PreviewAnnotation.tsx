@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Accordion,
   AccordionSummary,
@@ -191,12 +191,28 @@ const PreviewAnnotation: React.FC<PreviewAnnotationProps> = ({
   // State to track sub-field expansion (L2/L3)
   const [expandedFieldPaths, setExpandedFieldPaths] = useState<Set<string>>(new Set());
 
-  // When all aspects are expanded (expand all), also expand all nested fields
-  // When all aspects are collapsed, reset sub-field expansion
+  // Tracks the previous expandedItems value so we can detect a bulk "Open All"
+  // change (many keys added in one update) vs. a single accordion toggle
+  // (exactly one key added/removed at a time).
+  const prevExpandedItemsRef = useRef<Set<string>>(new Set());
+
+  // When all aspects are expanded via "Open All", also expand all nested fields.
+  // When all aspects are collapsed, reset sub-field expansion.
+  // A single accordion toggle must never trigger this, even if it happens to be
+  // the last aspect being opened manually.
   useEffect(() => {
+    const addedKeys = [...expandedItems].filter(key => !prevExpandedItemsRef.current.has(key));
+    prevExpandedItemsRef.current = expandedItems;
+
+    // With a single content-bearing aspect, opening it IS opening "all" aspects
+    // (there's nothing else to wrongly cascade into), so the bulk-add check below
+    // only needs to guard the multi-aspect case where a one-by-one manual toggle
+    // could otherwise be mistaken for "Open All".
+    const isBulkExpand = contentKeys.length <= 1 || addedKeys.length > 1;
+
     if (expandedItems.size === 0) {
       setExpandedFieldPaths(new Set());
-    } else if (contentKeys.length > 0 && contentKeys.every(key => expandedItems.has(key))) {
+    } else if (isBulkExpand && contentKeys.length > 0 && contentKeys.every(key => expandedItems.has(key))) {
       // Recursively collect all expandable field paths from aspect data.
       // Handles both kind-tagged (structValue/listValue) and plain-JSON shapes.
       const collectPaths = (
@@ -365,7 +381,7 @@ const PreviewAnnotation: React.FC<PreviewAnnotationProps> = ({
 
   return (
     <>
-      <div style={{ fontSize: "0.75rem", display: "flex", flexDirection: "column", flex: "1 1 auto", overflow: "hidden", borderRadius: '12px', ...css }}>
+      <div style={{ fontSize: "0.75rem", display: "flex", flexDirection: "column", flex: "1 1 auto", overflow: "visible", borderRadius: '12px', ...css }}>
         {keys.map((key) => {
           const isSchema = key === `${number}.global.schema`;
           const isOverview = key.endsWith('.global.overview');
@@ -496,7 +512,6 @@ const PreviewAnnotation: React.FC<PreviewAnnotationProps> = ({
                   ...(isLastAspect && {
                     borderBottomLeftRadius: '12px',
                     borderBottomRightRadius: '12px',
-                    overflow: 'hidden',
                   }),
                 }}>
                   {renderAnnotation(hasFields ? rawData.fields : rawData, key)}

@@ -1,5 +1,6 @@
 import { createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import axios, { AxiosError } from "axios";
+import { URLS } from "../../constants/urls";
 import {
   type GlossaryItem,
   type GlossaryRelation,
@@ -61,7 +62,27 @@ const updateChildrenInTree = (
 ): boolean => {
   for (const node of nodes) {
     if (node.id === parentId) {
-      node.children = [...newChildren];
+      // Merge children to preserve details fetched by concurrent thunks (like aspects)
+      if (node.children && node.children.length > 0) {
+        const existingMap = new Map(node.children.map(c => [c.id, c]));
+        node.children = newChildren.map(nc => {
+          const existing = existingMap.get(nc.id);
+          if (existing) {
+            return {
+              ...nc,
+              aspects: existing.aspects || nc.aspects,
+              relations: existing.relations || nc.relations,
+              linkedAssets: existing.linkedAssets || nc.linkedAssets,
+              longDescription: existing.longDescription || nc.longDescription,
+              contacts: (existing.contacts && existing.contacts.length > 0) ? existing.contacts : nc.contacts,
+              description: existing.description || nc.description,
+            };
+          }
+          return nc;
+        });
+      } else {
+        node.children = [...newChildren];
+      }
       return true;
     }
     if (node.children && node.children.length > 0) {
@@ -79,6 +100,12 @@ const updateDetailsInTree = (
 ): boolean => {
   for (const node of nodes) {
     if (node.id === targetId) {
+      // Fill in the real title once it arrives. Without this, a node created
+      // as a placeholder (e.g. a "Loading..." stub for a glossary discovered
+      // via search, before its own entry was ever fetched) keeps that
+      // placeholder name forever - merging details never used to touch it.
+      node.displayName = details.entrySource?.displayName || node.displayName;
+
       // 1. Update basic description
       const basicDesc =
         details.entrySource?.description ||
@@ -129,18 +156,13 @@ export const fetchGlossaryChildren = createAsyncThunk(
     try {
       axios.defaults.headers.common["Authorization"] = `Bearer ${id_token}`;
 
-      const baseUrl = `https://dataplex.googleapis.com/v1/${parentId}`;
+      // Fetch Categories and Terms via backend proxy
+      const childrenRes = await axios.get(URLS.API_URL + URLS.GLOSSARY_CHILDREN, {
+        params: { parent: parentId },
+      });
 
-      // 1. Fetch Categories and Terms
-      const [categoriesRes, termsRes] = await Promise.all([
-        axios
-          .get(`${baseUrl}/categories`)
-          .catch(() => ({ data: { categories: [] } })),
-        axios.get(`${baseUrl}/terms`).catch(() => ({ data: { terms: [] } })),
-      ]);
-
-      const rawCategories = categoriesRes.data.categories || [];
-      const rawTerms = termsRes.data.terms || [];
+      const rawCategories = childrenRes.data.categories || [];
+      const rawTerms = childrenRes.data.terms || [];
 
       // 2. Map raw API data to GlossaryItem
       // Use 'any' temporarily in map to allow adding 'parent' property which might not be in GlossaryItem interface
@@ -209,6 +231,12 @@ export const fetchGlossaryChildren = createAsyncThunk(
       return { parentId, children: rootChildren };
     } catch (error) {
       console.error("Error fetching children:", error);
+      // 403 is the one reliable signal that the glossary itself is unreadable.
+      // Everything else - including an empty result - must NOT be treated as a
+      // denial: an empty glossary is a normal, readable glossary.
+      if ((error as AxiosError)?.response?.status === 403) {
+        return rejectWithValue({ type: "PERMISSION_DENIED", parentId });
+      }
       return rejectWithValue("Failed to fetch children");
     }
   }
@@ -231,10 +259,10 @@ export const fetchItemDetails = createAsyncThunk(
         finalEntryName = `projects/${project}/locations/${location}/entryGroups/@dataplex/entries/${entryName}`;
       }
 
-      const lookupUrl = `https://dataplex.googleapis.com/v1/projects/${project}/locations/${location}:lookupEntry`;
-
-      const response = await axios.get(lookupUrl, {
+      const response = await axios.get(URLS.API_URL + URLS.LOOKUP_ENTRY_REST, {
         params: {
+          project,
+          location,
           entry: finalEntryName,
           view: "ALL",
         },
@@ -268,9 +296,9 @@ export const fetchTermRelationships = createAsyncThunk(
 
       // Use the project/location from the term ID for the search scope
       const { project, location } = extractProjectLocation(termId);
-      const searchUrl = `https://dataplex.googleapis.com/v1/projects/${project}/locations/${location}:searchEntries`;
+      const searchUrl = URLS.API_URL + URLS.SEARCH_ENTRIES;
 
-      const commonBody = { pageSize: 100, orderBy: "relevance" };
+      const commonBody = { project, location, pageSize: 100, orderBy: "relevance" };
 
       // Parallelize the 3 search calls
       const [linkedRes, synonymRes, relatedRes] = await Promise.all([
@@ -291,26 +319,34 @@ export const fetchTermRelationships = createAsyncThunk(
         }),
       ]);
 
-      // Process Relations (Synonyms + Related)
+      // Process Relations (Synonyms + Related). Returns null for a result
+      // missing dataplexEntry/name rather than throwing - this whole thunk is
+      // wrapped in a single try/catch, so one malformed result would otherwise
+      // discard everything Promise.all already fetched successfully.
       const mapRelation = (
         res: any,
         type: "synonym" | "related"
-      ): GlossaryRelation => ({
-        id: res.dataplexEntry.name,
-        type: type,
-        displayName: res.dataplexEntry.entrySource.displayName,
-        description: res.dataplexEntry.entrySource.description || "",
-        lastModified: res.dataplexEntry.updateTime
-          ? new Date(res.dataplexEntry.updateTime).getTime() / 1000
-          : 0,
-      });
+      ): GlossaryRelation | null => {
+        const entry = res?.dataplexEntry;
+        const id = entry?.name;
+        if (!id) return null;
+        return {
+          id,
+          type,
+          displayName: entry.entrySource?.displayName || "Untitled",
+          description: entry.entrySource?.description || "",
+          lastModified: entry.updateTime
+            ? new Date(entry.updateTime).getTime() / 1000
+            : 0,
+        };
+      };
 
-      const synonyms = (synonymRes.data.results || []).map((r: any) =>
-        mapRelation(r, "synonym")
-      );
-      const related = (relatedRes.data.results || []).map((r: any) =>
-        mapRelation(r, "related")
-      );
+      const synonyms = (synonymRes.data.results || [])
+        .map((r: any) => mapRelation(r, "synonym"))
+        .filter((r: GlossaryRelation | null): r is GlossaryRelation => r !== null);
+      const related = (relatedRes.data.results || [])
+        .map((r: any) => mapRelation(r, "related"))
+        .filter((r: GlossaryRelation | null): r is GlossaryRelation => r !== null);
 
       return {
         termId,
@@ -340,10 +376,10 @@ export const fetchGlossaryEntryDetails = createAsyncThunk(
         finalEntryName = `projects/${project}/locations/${location}/entryGroups/@dataplex/entries/${entryName}`;
       }
 
-      const lookupUrl = `https://dataplex.googleapis.com/v1/projects/${project}/locations/${location}:lookupEntry`;
-
-      const response = await axios.get(lookupUrl, {
+      const response = await axios.get(URLS.API_URL + URLS.LOOKUP_ENTRY_REST, {
         params: {
+          project,
+          location,
           entry: finalEntryName,
           view: "ALL",
         },
@@ -366,16 +402,37 @@ export const fetchGlossaryEntryDetails = createAsyncThunk(
   }
 );
 
-// Helper to map API Response to GlossaryItem
-const mapEntryToGlossaryItem = (apiResult: any): GlossaryItem => {
-  const entry = apiResult.dataplexEntry;
-  const source = entry.entrySource || {};
-  const name = entry.name;
+// fetchGlossaries queries `type=GLOSSARY` only, but that restriction is not
+// reliably honored once EXP:SEMANTIC is in the query - the response can still
+// contain a category or term nested under some other glossary. Also reused
+// by filterGlossaries/buildFilteredTree: search should only ever surface
+// glossaries, so category/term matches are rejected here too, not just
+// non-glossary types - "glossary-category".includes("glossary") is true, so
+// a plain substring check would let this exact bug through.
+const isTopLevelGlossaryEntry = (entryType?: string): boolean => {
+  const t = (entryType || "").toLowerCase();
+  return t.includes("glossary") && !t.includes("category") && !t.includes("term");
+};
+
+// Helper to map API Response to GlossaryItem. Returns null when the result
+// doesn't carry enough to build a usable id - EXP:SEMANTIC search responses
+// have already been shown (elsewhere in this file) to return unexpected
+// shapes, so this must degrade by skipping the entry rather than throwing
+// (this runs directly inside a reducer with no surrounding try/catch, and the
+// app has no error boundary) or producing a blank/colliding id.
+const mapEntryToGlossaryItem = (apiResult: any): GlossaryItem | null => {
+  const entry = apiResult?.dataplexEntry;
+  const source = entry?.entrySource || {};
+  const name = entry?.name;
   const id =
     source.resource ||
-    `projects/${name.split("/")[1]}/locations/${
-      name.split("/")[3]
-    }/glossaries/${name.split("/").pop()}`;
+    (name
+      ? `projects/${name.split("/")[1]}/locations/${
+          name.split("/")[3]
+        }/glossaries/${name.split("/").pop()}`
+      : undefined);
+
+  if (!id) return null;
 
   return {
     id: id,
@@ -400,25 +457,55 @@ const mapEntryToGlossaryItem = (apiResult: any): GlossaryItem => {
 
 export const fetchGlossaries = createAsyncThunk(
   "glossaries/fetchGlossaries",
-  async (requestData: any, { rejectWithValue }) => {
+  async (requestData: any, { rejectWithValue, getState }) => {
     try {
-      const url = `https://dataplex.googleapis.com/v1/projects/${
-        import.meta.env.VITE_GOOGLE_PROJECT_ID
-      }/locations/global:searchEntries`;
+      const url = URLS.API_URL + URLS.SEARCH_ENTRIES;
 
       // Set Auth Header
       axios.defaults.headers.common["Authorization"] = requestData.id_token
         ? `Bearer ${requestData.id_token}`
         : "";
 
-      // Query specifically for Glossaries
-      const response = await axios.post(url, {
-        query: "type=GLOSSARY EXP:SEMANTIC", // Standard Knowledge Catalog syntax for finding glossaries
-        pageSize: 100,
-        ...requestData.options,
-      });
+      // Append project scope when restricted by config
+      const appConfig = (getState() as any).user?.userData?.appConfig;
+      const projectScope = (appConfig?.projectsRestricted && appConfig?.configuredProjectIds?.length > 0)
+        ? ` (projectid=(${appConfig.configuredProjectIds.join('|')}))`
+        : '';
 
-      return response.data;
+      // Query specifically for Glossaries. Raising pageSize alone (as a first pass)
+      // just moves the truncation point instead of removing it - a tenant with
+      // more glossaries than the cap still loses an arbitrary subset, and
+      // EXP:SEMANTIC ranking means a *different* subset per call, so the list
+      // appears to lose and regain glossaries between sessions. Follow
+      // nextPageToken until exhausted so there is no cap at all.
+      let allResults: any[] = [];
+      let pageToken: string | undefined;
+      let totalSize = 0;
+      do {
+        const response = await axios.post(url, {
+          project: import.meta.env.VITE_GOOGLE_PROJECT_ID,
+          location: "global",
+          query: `type=GLOSSARY EXP:SEMANTIC${projectScope}`, // Standard Knowledge Catalog syntax for finding glossaries
+          pageSize: 1000,
+          // Pin the ordering, as the other three search thunks in this file
+          // already do. Without it the page boundary above moves on every call.
+          orderBy: "relevance",
+          ...(pageToken ? { pageToken } : requestData.options),
+        });
+        // Filtered per page, before accumulating - see isTopLevelGlossaryEntry's
+        // comment for why a category/term slipping through must be dropped here,
+        // not left for mapEntryToGlossaryItem to mistype as a glossary.
+        allResults = allResults.concat(
+          (response.data.results || []).filter(
+            (result: { dataplexEntry?: { entryType?: string } }) =>
+              isTopLevelGlossaryEntry(result?.dataplexEntry?.entryType)
+          )
+        );
+        totalSize = response.data.totalSize || totalSize;
+        pageToken = response.data.nextPageToken;
+      } while (pageToken);
+
+      return { results: allResults, totalSize };
     } catch (error) {
       if (error instanceof AxiosError) {
         return rejectWithValue(error.response?.data || error.message);
@@ -440,24 +527,20 @@ export const fetchViewDetailsChildren = createAsyncThunk(
 
       // For categories, we need to extract the glossary ID and fetch from there
       // because the API doesn't support /categories/{id}/categories
-      let baseUrl = `https://dataplex.googleapis.com/v1/${parentId}`;
+      let baseParent = parentId;
 
       // If parentId is a category, extract the glossary path
       if (parentId.includes('/categories/')) {
-        const glossaryPath = parentId.substring(0, parentId.indexOf('/categories/'));
-        baseUrl = `https://dataplex.googleapis.com/v1/${glossaryPath}`;
+        baseParent = parentId.substring(0, parentId.indexOf('/categories/'));
       }
 
-      // 1. Fetch Categories and Terms
-      const [categoriesRes, termsRes] = await Promise.all([
-        axios
-          .get(`${baseUrl}/categories`)
-          .catch(() => ({ data: { categories: [] } })),
-        axios.get(`${baseUrl}/terms`).catch(() => ({ data: { terms: [] } })),
-      ]);
+      // Fetch Categories and Terms via backend proxy
+      const childrenRes = await axios.get(URLS.API_URL + URLS.GLOSSARY_CHILDREN, {
+        params: { parent: baseParent },
+      });
 
-      const rawCategories = categoriesRes.data.categories || [];
-      const rawTerms = termsRes.data.terms || [];
+      const rawCategories = childrenRes.data.categories || [];
+      const rawTerms = childrenRes.data.terms || [];
 
       // 2. Map raw API data to GlossaryItem
       const allCategoryItems = rawCategories.map((c: any) => ({
@@ -546,10 +629,10 @@ export const fetchViewDetailsEntryDetails = createAsyncThunk(
         finalEntryName = `projects/${project}/locations/${location}/entryGroups/@dataplex/entries/${entryName}`;
       }
 
-      const lookupUrl = `https://dataplex.googleapis.com/v1/projects/${project}/locations/${location}:lookupEntry`;
-
-      const response = await axios.get(lookupUrl, {
+      const response = await axios.get(URLS.API_URL + URLS.LOOKUP_ENTRY_REST, {
         params: {
+          project,
+          location,
           entry: finalEntryName,
           view: "ALL",
         },
@@ -574,9 +657,9 @@ export const fetchViewDetailsTermRelationships = createAsyncThunk(
       axios.defaults.headers.common["Authorization"] = `Bearer ${id_token}`;
 
       const { project, location } = extractProjectLocation(termId);
-      const searchUrl = `https://dataplex.googleapis.com/v1/projects/${project}/locations/${location}:searchEntries`;
+      const searchUrl = URLS.API_URL + URLS.SEARCH_ENTRIES;
 
-      const commonBody = { pageSize: 100, orderBy: "relevance" };
+      const commonBody = { project, location, pageSize: 100, orderBy: "relevance" };
 
       const [linkedRes, synonymRes, relatedRes] = await Promise.all([
         axios.post(searchUrl, {
@@ -593,25 +676,34 @@ export const fetchViewDetailsTermRelationships = createAsyncThunk(
         }),
       ]);
 
+      // Returns null for a result missing dataplexEntry/name rather than
+      // throwing - this whole thunk is wrapped in a single try/catch, so one
+      // malformed result would otherwise discard everything Promise.all
+      // already fetched successfully.
       const mapRelation = (
         res: any,
         type: "synonym" | "related"
-      ): GlossaryRelation => ({
-        id: res.dataplexEntry.name,
-        type: type,
-        displayName: res.dataplexEntry.entrySource.displayName,
-        description: res.dataplexEntry.entrySource.description || "",
-        lastModified: res.dataplexEntry.updateTime
-          ? new Date(res.dataplexEntry.updateTime).getTime() / 1000
-          : 0,
-      });
+      ): GlossaryRelation | null => {
+        const entry = res?.dataplexEntry;
+        const id = entry?.name;
+        if (!id) return null;
+        return {
+          id,
+          type,
+          displayName: entry.entrySource?.displayName || "Untitled",
+          description: entry.entrySource?.description || "",
+          lastModified: entry.updateTime
+            ? new Date(entry.updateTime).getTime() / 1000
+            : 0,
+        };
+      };
 
-      const synonyms = (synonymRes.data.results || []).map((r: any) =>
-        mapRelation(r, "synonym")
-      );
-      const related = (relatedRes.data.results || []).map((r: any) =>
-        mapRelation(r, "related")
-      );
+      const synonyms = (synonymRes.data.results || [])
+        .map((r: any) => mapRelation(r, "synonym"))
+        .filter((r: GlossaryRelation | null): r is GlossaryRelation => r !== null);
+      const related = (relatedRes.data.results || [])
+        .map((r: any) => mapRelation(r, "related"))
+        .filter((r: GlossaryRelation | null): r is GlossaryRelation => r !== null);
 
       return {
         termId,
@@ -738,7 +830,15 @@ const buildFilteredTree = (
   const resultTree: GlossaryItem[] = [];
   const addedIds = new Set<string>();
 
-  filteredResults.forEach((filteredItem) => {
+  filteredResults
+    // Defensive second guard: filterGlossaries already restricts results to
+    // genuine top-level glossaries before they reach here (category/term are
+    // dropped entirely, not just non-glossary types), but anything else that
+    // feeds this function must not be able to place a category/term, a
+    // BigQuery table, an aspect type, etc. at the tree root looking like a
+    // real glossary.
+    .filter((item) => isTopLevelGlossaryEntry(item.entryType))
+    .forEach((filteredItem) => {
     // Check if item exists in original tree
     const originalItem = originalMap.get(filteredItem.id);
 
@@ -746,16 +846,21 @@ const buildFilteredTree = (
       // Item exists in original tree - find its path and add to result
       addPathToTree(resultTree, originalTree, filteredItem.id, addedIds);
     } else {
-      // Item NOT in original tree - mark as inaccessible
-      // Check if we've already added this item
+      // Item is not in the loaded tree - that only means its branch hasn't
+      // been loaded yet, not that it's inaccessible. There is no pre-check
+      // for Dataplex glossary access (the SDK exposes no per-glossary
+      // testIamPermissions), so access is only ever discovered by the user
+      // actually clicking through - handleNavigate fetches the branch and
+      // entry details on demand, and the content pane's existing "no
+      // access" banner (driven by accessDeniedItemId) reveals a real denial
+      // then. Nothing is fetched here just to find out in advance.
       if (!addedIds.has(filteredItem.id)) {
-        const inaccessibleItem: GlossaryItem = {
+        resultTree.push({
           ...filteredItem,
-          isInaccessible: true,
+          isInaccessible: false,
           isFilterMatch: true,
           children: [],
-        };
-        resultTree.push(inaccessibleItem);
+        } as GlossaryItem);
         addedIds.add(filteredItem.id);
       }
     }
@@ -925,30 +1030,63 @@ export const filterGlossaries = createAsyncThunk(
       id_token: string;
       pageSize?: number;
     },
-    { rejectWithValue }
+    { rejectWithValue, getState }
   ) => {
     try {
       const projectId = import.meta.env.VITE_GOOGLE_PROJECT_ID;
-      const searchUrl = `https://dataplex.googleapis.com/v1/projects/${projectId}/locations/global:searchEntries`;
+      const searchUrl = URLS.API_URL + URLS.SEARCH_ENTRIES;
 
       axios.defaults.headers.common["Authorization"] = `Bearer ${id_token}`;
 
-      const query = buildFilterQuery(filters);
+      // Append project scope when restricted by config
+      const appConfig = (getState() as any).user?.userData?.appConfig;
+      const projectScope = (appConfig?.projectsRestricted && appConfig?.configuredProjectIds?.length > 0)
+        ? ` (projectid=(${appConfig.configuredProjectIds.join('|')}))`
+        : '';
 
-      const response = await axios.post(searchUrl, {
-        query,
-        pageSize: pageSize ?? 100,
-        orderBy: "relevance",
-      });
+      const query = buildFilterQuery(filters) + projectScope;
 
-      // Map results to GlossaryItem format
-      const items = (response.data.results || []).map((result: any) =>
-        mapSearchResultToGlossaryItem(result)
-      );
+      // A search must return every match, not just the first page - a user who
+      // searches and doesn't find an expected result has no way to know it was
+      // silently cut. The old single-request call capped at pageSize (default
+      // 100) and never read nextPageToken, so anything beyond the first page
+      // was dropped without any signal that more existed.
+      let rawResults: Array<Parameters<typeof mapSearchResultToGlossaryItem>[0]> = [];
+      let pageToken: string | undefined;
+      do {
+        const response = await axios.post(searchUrl, {
+          project: projectId,
+          location: "global",
+          query,
+          pageSize: pageSize ?? 1000,
+          orderBy: "relevance",
+          ...(pageToken ? { pageToken } : {}),
+        });
+        rawResults = rawResults.concat(response.data.results || []);
+        pageToken = response.data.nextPageToken;
+      } while (pageToken);
+
+      // Map results to GlossaryItem format. Restricted to genuine top-level
+      // glossaries BEFORE mapping - see isTopLevelGlossaryEntry's comment:
+      // category/term are dropped entirely here (not just non-glossary
+      // types), since search should only ever surface glossaries.
+      //
+      // Deliberately not pre-fetching the branches these matches live in:
+      // there's no way to pre-check Dataplex glossary access (the SDK has no
+      // per-glossary testIamPermissions), so a speculative fetch here would
+      // just be guessing at the same cost as waiting for a real click -
+      // buildFilteredTree places an unresolved match as a normal row, and the
+      // user discovers access (or denial) the normal way, by clicking into it.
+      const items = rawResults
+        .filter((result) => isTopLevelGlossaryEntry(result?.dataplexEntry?.entryType))
+        .map((result) => mapSearchResultToGlossaryItem(result));
 
       return {
         items,
-        totalSize: response.data.totalSize || items.length,
+        // response.data.totalSize counts the unfiltered response, which can
+        // include the dropped category/term and non-glossary entries - using it
+        // here would show a result count larger than what actually renders.
+        totalSize: items.length,
         query,
       };
     } catch (error) {
@@ -1000,10 +1138,12 @@ export const glossariesSlice = createSlice({
   name: "glossaries",
   initialState,
   reducers: {
-    clearGlossaries: (state) => {
-      state.glossaryItems = [];
-      state.status = "idle";
-    },
+    // Full reset. Previously this cleared only glossaryItems/status, so
+    // activeFilters and filteredTreeItems survived logout - and since the page
+    // renders filteredTreeItems whenever activeFilters is non-empty, the next
+    // session opened on the previous one's filtered subset, looking like
+    // glossaries had gone missing.
+    clearGlossaries: () => initialState,
     setActiveFilters: (state, action: { payload: FilterChip[] }) => {
       state.activeFilters = action.payload;
     },
@@ -1059,9 +1199,9 @@ export const glossariesSlice = createSlice({
         state.totalSize = action.payload.totalSize || 0;
 
         if (action.payload.results) {
-          const newItems = action.payload.results.map((result: any) =>
-            mapEntryToGlossaryItem(result)
-          );
+          const newItems = action.payload.results
+            .map((result: any) => mapEntryToGlossaryItem(result))
+            .filter((item: GlossaryItem | null): item is GlossaryItem => item !== null);
 
           const existingItemMap = new Map(
             state.glossaryItems.map((item) => [item.id, item])
@@ -1111,11 +1251,25 @@ export const glossariesSlice = createSlice({
             relations: [],
           } as GlossaryItem);
         }
+
+        // Keep the active search/filter tree in sync with lazily-loaded
+        // children. The sidebar renders filteredTreeItems while filters are
+        // active, so without this an expanded match (whose branch wasn't
+        // pre-loaded into glossaryItems) would stay empty. No-ops when no
+        // filter is active or the parent isn't part of the filtered tree.
+        updateChildrenInTree(state.filteredTreeItems, parentId, children);
       })
       .addCase(fetchGlossaryEntryDetails.fulfilled, (state, action) => {
-        state.accessDeniedItemId = null;
-
         const { entryName, details } = action.payload;
+        // Only clear the flag if THIS response is for the id it currently names.
+        // Two call sites dispatch this thunk (auto-select-first-item on mount,
+        // and every click) and can be in flight together - an older, slower
+        // fetch succeeding after a newer, faster 403 for a DIFFERENT item must
+        // not wipe that item's flag. Nothing re-fetches that id again, so the
+        // tabs shimmer gated on this flag would stay stuck forever.
+        if (state.accessDeniedItemId === entryName) {
+          state.accessDeniedItemId = null;
+        }
         const updated = updateDetailsInTree(state.glossaryItems, entryName, details);
 
         // If item doesn't exist in tree, create it with details
@@ -1165,6 +1319,12 @@ export const glossariesSlice = createSlice({
             aspects: details.aspects,
           } as GlossaryItem);
         }
+
+        // Mirror the details onto the filtered tree too (see fetchGlossaryChildren
+        // above): a filtered match's node lives in filteredTreeItems, so its
+        // description/aspects must be updated there as well. No-op when it isn't
+        // part of the active filtered tree.
+        updateDetailsInTree(state.filteredTreeItems, entryName, details);
       })
       .addCase(fetchTermRelationships.fulfilled, (state, action) => {
         const updated = updateTermDataInTree(
@@ -1303,7 +1463,7 @@ export const glossariesSlice = createSlice({
       .addCase(filterGlossaries.fulfilled, (state, action) => {
         state.filterStatus = "succeeded";
         state.filteredItems = action.payload.items;
-        // Build the filtered tree with full paths from root to matched items
+        // Build the filtered tree with full paths from root to matched items.
         state.filteredTreeItems = buildFilteredTree(
           state.glossaryItems,
           action.payload.items
@@ -1316,8 +1476,20 @@ export const glossariesSlice = createSlice({
       .addCase(fetchGlossaryEntryDetails.rejected, (state, action) => {
         const payload = action.payload as { type?: string; itemId?: string } | string;
         if (typeof payload === "object" && payload?.type === "PERMISSION_DENIED") {
-          state.accessDeniedItemId = payload.itemId || null;
-        } else {
+          // Only the SELECTED item's denial should drive the tabs shimmer.
+          // filterGlossaries' missing-parent batch dispatches this same thunk
+          // for OTHER glossaries the user never selected (branches holding
+          // search matches) - letting those write here hijacks the flag away
+          // from whatever is actually selected, and nothing re-fetches the
+          // real selection afterward to correct it, so the shimmer gated on
+          // this flag would stay stuck forever.
+          if (payload.itemId === state.selectedId) {
+            state.accessDeniedItemId = payload.itemId;
+          }
+        } else if (state.accessDeniedItemId === action.meta.arg.entryName) {
+          // Same race as the fulfilled case above: a non-403 failure for this
+          // id should clear the flag only if it's the one currently flagged -
+          // not wipe a DIFFERENT item's just-set denial out from under it.
           state.accessDeniedItemId = null;
         }
       }); 

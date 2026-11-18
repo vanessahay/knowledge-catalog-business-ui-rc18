@@ -499,7 +499,7 @@ describe('silentAuthService', () => {
           origin: 'http://localhost:3000',
           data: {
             type: 'silent-auth-response',
-            accessToken: 'new-access-token',
+            accessToken: 'new-access-token', // pragma: allowlist secret
           },
         })
       );

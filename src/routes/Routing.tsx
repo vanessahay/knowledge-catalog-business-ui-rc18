@@ -45,7 +45,7 @@ const Routing = () => {
 
   useEffect(() => {
     // Only redirect if we're on the root path or login page
-    const shouldRedirect = location.pathname === '/' || location.pathname === '/login';
+    const shouldRedirect = location.pathname === '/'; // RedirectGuard handles /login redirects
 
     if (userState && shouldRedirect) {
       if(userState.userData?.hasRole) {
@@ -74,10 +74,7 @@ const Routing = () => {
         path="/login"
         element={
           <RedirectGuard isAuthenticated={!!(user && user.email)}>
-            {user && user.email ?
-              <Navigate to="/home" replace />
-              : <LoginV2 />
-            }
+            <LoginV2 />
           </RedirectGuard>
         }
       />
@@ -205,6 +202,7 @@ const Routing = () => {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/rc18-dashboard"
         element={
@@ -267,7 +265,7 @@ const Routing = () => {
                         <div style={{ flex: '1 1 0', width: '50%'  }}>
                           <div style={{ color: "#575757", fontSize: "1.6875rem", fontWeight: "500", fontFamily: '"Google Sans Text",sans-serif' }}>Knowledge Catalog Business Interface Support</div>
                           <div style={{ textDecoration:"underline", color: "#022FCD", fontSize: "1rem", fontWeight: "600", fontFamily: '"Google Sans Text",sans-serif', marginTop: "0.125rem", textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                            dataplex-interface-feedback@google.com
+                            dataplex-interface-feedback@example.com
                           </div>
                         </div>
                       </div>

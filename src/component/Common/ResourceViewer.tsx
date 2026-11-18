@@ -11,7 +11,8 @@ import type { AppDispatch } from '../../app/store';
 import { fetchEntry, clearHistory } from '../../features/entry/entrySlice';
 import SubmitAccess from '../SearchPage/SubmitAccess';
 import NotificationBar from '../SearchPage/NotificationBar';
-import { getName } from '../../utils/resourceUtils';
+import { getName, toJsDate } from '../../utils/resourceUtils';
+import { FEATURE_FLAGS } from '../../utils/featureFlags';
 import FilterChipCarousel from './FilterChipCarousel';
 import { useNoAccess } from '../../contexts/NoAccessContext';
 
@@ -322,13 +323,8 @@ const ResourceViewer: React.FC<ResourceViewerProps> = ({
 
   // Utility functions
   const getFormatedDate = (date: any) => {
-    if (!date) return '-';
-    
-    const myDate = new Date(date);
-
-    if (isNaN(myDate.getTime())) {
-      return '-';
-    }
+    const myDate = toJsDate(date);
+    if (!myDate) return '-';
 
     const formatedDate = new Intl.DateTimeFormat('en-US', { month: "long", day: "numeric", year: "numeric" }).format(myDate);
     return (formatedDate);
@@ -360,7 +356,7 @@ const ResourceViewer: React.FC<ResourceViewerProps> = ({
 
     if (isCurrentlyPreviewed && isAccessGranted) {
       dispatch(clearHistory());
-      navigate('/view-details');
+      navigate(`/view-details?entry=${encodeURIComponent(btoa(clickedEntry.name))}`);
     } else {
       onPreviewDataChange(clickedEntry);
     }
@@ -369,7 +365,7 @@ const ResourceViewer: React.FC<ResourceViewerProps> = ({
   const handleNavigateToTab = (clickedEntry: any, tabName: string) => {
     dispatch(clearHistory());
     dispatch(fetchEntry({ entryName: clickedEntry.name, id_token }));
-    navigate('/view-details', { state: { tabName } });
+    navigate(`/view-details?entry=${encodeURIComponent(btoa(clickedEntry.name))}&tab=${tabName}`);
   };
 
   const handleRequestAccessFromCard = (clickedEntry: any) => {
@@ -741,7 +737,7 @@ const ResourceViewer: React.FC<ResourceViewerProps> = ({
                     disableHoverEffect={disableHoverEffect}
                     onNavigateToTab={handleNavigateToTab}
                     id_token={id_token}
-                    onRequestAccess={handleRequestAccessFromCard}
+                    onRequestAccess={FEATURE_FLAGS.enableRequestAccess ? handleRequestAccessFromCard : undefined}
                   />
                 </Box>
               );

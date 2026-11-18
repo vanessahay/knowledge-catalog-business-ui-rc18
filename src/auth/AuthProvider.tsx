@@ -8,7 +8,10 @@ import { useNotification } from '../contexts/NotificationContext';
 import { setGlobalAuthFunctions, setAuthNotificationShown } from '../services/authErrorService';
 import { performSilentAuth } from '../services/silentAuthService';
 import { AUTH_CONFIG } from '../constants/auth';
-import { setIsLoaded } from '../features/projects/projectsSlice';
+import { resetProjects } from '../features/projects/projectsSlice';
+import { resetSelectedDataProduct, resetDataProductsUIState } from '../features/dataProducts/dataProductsSlice';
+import { clearGlossaries } from '../features/glossaries/glossariesSlice';
+import { resetBrowseUIState, clearAspectBrowseCache } from '../features/resources/resourcesSlice';
 import { useAppDispatch, useAppSelector } from '../app/store';
 
 
@@ -43,19 +46,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const token = credentialResponse.credential;
         axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
 
-        let profile = { name: 'Desenvolvedor Local', email: 'usuario.teste@empresa.com.br', picture: '' };
-        if (!token.startsWith('mock-')) {
-          try {
-            const profileRes = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
-              headers: { Authorization: `Bearer ${token}` },
-            });
-            if (profileRes.data) {
-              profile = profileRes.data;
-            }
-          } catch (profileErr) {
-            console.warn('[AuthProvider] Could not fetch Google userinfo, using default profile:', profileErr);
-          }
-        }
+        // Fetch user profile from Google OAuth2 userinfo
+        const profileRes = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const profile = profileRes.data;
 
         // Calculate token timestamps
         const tokenIssuedAt = Math.floor(Date.now() / 1000);
@@ -92,7 +87,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const logout = useCallback(() => {
     isLoggedOut.current = true;
     dispatch(setCredentials({token: null, user: null}));
-    dispatch(setIsLoaded({ isloaded: false }));
+    // Clear user-scoped slices entirely (not just their loaded flags) so none of
+    // the previous user's data survives into the next session in this tab.
+    dispatch(resetProjects());
+    dispatch(clearGlossaries());
+    // BrowseByAnnotation skips rebuilding its list whenever
+    // browseDynamicAnnotationsData is already populated, and the resources slice
+    // was never reset here - so the next session rendered the previous session's
+    // aspect list regardless of what /app-configs returned.
+    dispatch(resetBrowseUIState());
+    dispatch(clearAspectBrowseCache());
+    dispatch(resetDataProductsUIState());
+    dispatch(resetSelectedDataProduct()); // Reset DP detail status so self-hydration fires on next deep-link login
     clearUserState(); // Clear user state from IndexedDB
     clearPersistedState(); // Clear persisted Redux state (search, resources, entry)
     showInfo('You have been signed out.', 3000);

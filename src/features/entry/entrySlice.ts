@@ -1,4 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import type { PayloadAction } from '@reduxjs/toolkit';
 import { URLS } from '../../constants/urls';
 import axios, { AxiosError } from 'axios';
 import type { GlossaryItem } from '../../component/Glossaries/GlossaryDataType';
@@ -59,6 +60,7 @@ export const fetchEntry = createAsyncThunk('entry/fetchEntry', async (requestDat
         return rejectWithValue({
           type: 'PERMISSION_DENIED',
           message: "You don't have access to this resource",
+          itemId: requestData.entryName,
         });
       }
       return rejectWithValue(error.response?.data || error.message);
@@ -156,6 +158,8 @@ type EntryState = {
   lineageEntryError: string | undefined | unknown | null;
   lineageToEntryCopy: boolean;
   history: unknown[]; // Stack to track previous entries
+  tabHistory: (string | null)[]; // Parallel stack: tab name active when each history entry was pushed
+  pendingTabName: string | null; // Tab name to restore after popFromHistory (consumed by ViewDetails)
   accessCheckCache: Record<string, { status: 'loading' | 'succeeded' | 'failed'; error?: unknown }>;
   entryLinks: GlossaryItem[];
   entryLinksStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
@@ -171,6 +175,8 @@ const initialState: EntryState = {
   lineageEntryError: null,
   lineageToEntryCopy:false,
   history: [],
+  tabHistory: [],
+  pendingTabName: null,
   accessCheckCache: {},
   entryLinks: [],
   entryLinksStatus: 'idle',
@@ -185,14 +191,22 @@ export const entrySlice = createSlice({
     setEntry: (state, action) => {
       state.items = action.payload;
       state.status = 'succeeded';
+      // Changing the displayed entry outside of fetchEntry must still invalidate
+      // the previous entry's linked terms, or the Glossary Terms tab's idle-status
+      // fetch guard can stay stuck on a stale 'succeeded'/'failed' value.
+      state.entryLinks = [];
+      state.entryLinksStatus = 'idle';
+      state.entryLinksError = null;
     },
     setLineageToEntryCopy: (state, action) => {
       state.lineageToEntryCopy = action.payload;
     },
-    pushToHistory: (state) => {
-      // Push current entry to history before setting new entry
+    pushToHistory: (state, action: PayloadAction<string | undefined>) => {
+      // Push current entry to history before setting new entry.
+      // Optional payload = the tab name active when leaving, so back can restore it.
       if (state.items && Object.keys(state.items).length > 0) {
         state.history.push(state.items);
+        state.tabHistory.push(action.payload ?? null);
       }
     },
     popFromHistory: (state) => {
@@ -200,10 +214,24 @@ export const entrySlice = createSlice({
       if (state.history.length > 0) {
         state.items = state.history.pop();
         state.status = 'succeeded';
+        // Restore the tab that was active for this entry (consumed by ViewDetails).
+        state.pendingTabName = state.tabHistory.length > 0 ? (state.tabHistory.pop() ?? null) : null;
+        // The entry being restored may differ from whichever entry last fetched
+        // links, so clear them — otherwise the Glossary Terms tab's idle-status
+        // fetch guard can stay stuck on a stale 'succeeded'/'failed' value and
+        // either skip refetching or show the wrong entry's linked terms.
+        state.entryLinks = [];
+        state.entryLinksStatus = 'idle';
+        state.entryLinksError = null;
       }
     },
     clearHistory: (state) => {
       state.history = [];
+      state.tabHistory = [];
+      state.pendingTabName = null;
+    },
+    clearPendingTab: (state) => {
+      state.pendingTabName = null;
     },
     resetAccessCheck: (state) => {
       state.accessCheckCache = {};
@@ -242,6 +270,13 @@ export const entrySlice = createSlice({
           state.items = action.payload;
           state.status = 'succeeded';
           state.lineageToEntryCopy = false;
+          // This swaps the displayed entry outside of fetchEntry, so invalidate
+          // the previous entry's linked terms the same way fetchEntry.pending
+          // does — otherwise the Glossary Terms tab's idle-status fetch guard
+          // stays stuck on the old entry's status and never refetches.
+          state.entryLinks = [];
+          state.entryLinksStatus = 'idle';
+          state.entryLinksError = null;
         }
       })
       .addCase(fetchLineageEntry.rejected, (state, action) => {
@@ -282,5 +317,5 @@ export const entrySlice = createSlice({
   },
 });
 
-export const { setEntry, pushToHistory, popFromHistory, clearHistory, resetAccessCheck } = entrySlice.actions;
+export const { setEntry, pushToHistory, popFromHistory, clearHistory, clearPendingTab, resetAccessCheck } = entrySlice.actions;
 export default entrySlice.reducer;

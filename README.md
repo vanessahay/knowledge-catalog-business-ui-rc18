@@ -1,387 +1,176 @@
-# Knowledge Catalog Business Interface - 1.4.0
+# Knowledge Catalog Business Interface - v1.4.4 (+ Framework BACEN RC 18/2025)
 
-An open-source, web-based application called **`Knowledge Catalog Business Interface`** which aims to help business users of BigQuery customers discover and access data assets in the **Knowledge Catalog** (formerly Dataplex Universal Catalog).
-## Key objectives of the application include:
-- Empowering business users to find relevant data independently.
-- Streamlining the data access request process using **Knowledge Catalog's** API.
-**Improving** data governance and compliance with an audit trail for access requests.
-Increasing data literacy by making data more discoverable.
-Providing a customizable platform for future data governance enhancements.
-## The target user personas are:
-Business users and others who need to access and understand data in **Knowledge Catalog**.
-Data Stewards.
-
-## Key Features
-### Secure Google Sign-In: 
-Integration with @react-oauth/google for a smooth and secure login experience.
-### Protected Routes: 
-Utilizes react-router-dom to protect specific routes, redirecting unauthenticated users to the login page.
-### Modern Tech Stack: 
-Built with Vite for a fast development experience, TypeScript for type safety, and Tailwind CSS for utility-first styling.
-### Mock Backend Simulation: 
-Includes a simulated API to demonstrate the frontend's interaction with a backend for exchanging the authorization code, allowing the frontend to be run standalone for development.
-### **GCP APIs** Permission Check: 
-After successful authentication, the application will use **GCP APIs** to check if the logged-in user has **Knowledge Catalog** permissions. This check will ensure that only authorized users can access **Knowledge Catalog** data.
-### Search with Filters: 
-The UI will allow users to search for **Knowledge Catalog** datasets using various filters. The search functionality will leverage **Knowledge Catalog** APIs to query the data.
-### Catalogs Retrieval: 
-The application will retrieve and display **Knowledge Catalog** catalogs. Users will be able to browse through the catalogs to find datasets.
-### Dataset Details: 
-When a user selects a dataset, the application will fetch and display details such as Asset name, description, Project ID, and metadata using the **Knowledge Catalog** API.
-
-## Libraries & Tools
-**React**: The core UI library.
-
-**TypeScript**: For static typing and improved code quality.
-
-**Vite**: A next-generation frontend tooling for fast development builds.
-
-**@react-oauth/google**: The primary library for handling the Google OAuth flow on the client side.
-
-**React Router**: For client-side routing and managing protected routes.
-
-**Material UI**: For modern, responsive, utility-first styling.
+Uma aplicação web open-source baseada no **[GoogleCloudPlatform/knowledge-catalog-business-user-interface (v1.4.4)](https://github.com/GoogleCloudPlatform/knowledge-catalog-business-user-interface)**, atualizada para as APIs mais recentes do **Google Cloud Knowledge Catalog** (anteriormente Dataplex Universal Catalog) e estendida com o **Painel Plug-and-Play de Governança Regulatória (Resolução Conjunta BACEN nº 18/2025 & LGPD)**.
 
 ---
 
-## 🚀 Como Instalar e Utilizar na Sua Própria Organização / Projeto GCP
+## ✨ Principais Capacidades
 
-Este aplicativo foi projetado com arquitetura **multi-tenant e dinâmica**, permitindo que **qualquer empresa, organização ou usuário do Google Cloud** instale, configure e utilize a interface visual com seus próprios dados e políticas de governança no **Google Cloud / Dataplex / BigQuery**.
+1. **Catálogo Corporativo Completo (Upstream `v1.4.4`)**:
+   - **Busca Semântica e Estruturada (`SearchEntries`)**: Descoberta de ativos BigQuery, Cloud Storage, Spanner, AlloyDB, Bigtable e Looker respeitando ACLs de origem.
+   - **Glossários de Negócio (`Business Glossaries`)**: Carregamento sob demanda de glossários, categorias, termos, sinônimos e ativos vinculados.
+   - **Navegação por Aspectos (`Browse by Aspects`)**: Filtragem por Aspect Types e suporte nativo ao novo aspecto de sistema `dataplex-types.global.data-quality-scorecard`.
+   - **Data Products (`Produtos de Dados`)**: Visualização consolidada multi-projeto, contratos/SLAs e fluxo de solicitação de acesso (`VITE_FEATURE_REQUEST_ACCESS`).
+   - **Linhagem e Insights de Tabelas**: Grafo interativo de linhagem em nível de tabela e coluna.
 
-### ✨ 1. Deploy Automatizado em 1 Clique (Script de Instalação)
-Para facilitar a instalação em um novo projeto GCP ou organização, disponibilizamos um script interativo que automatiza a ativação das APIs, criação do Artifact Registry, compilação via Cloud Build e publicação segura no Cloud Run.
+2. **Painel Plug-and-Play — Framework BACEN RC 18/2025 & LGPD (`/rc18-dashboard`)**:
+   - **Visão 1 — Qualidade de Dados (Dataplex Auto DQ & `data-quality-scorecard`)**: Consolidação automática nas dimensões de **Acurácia**, **Completude** e **Consistência** via `DataScanServiceClient` (multi-região automático) e aspectos `data-quality-scorecard`.
+   - **Visão 2 — Classificação & Sigilo Bancário (Sensitive Data Protection / Cloud DLP & Policy Tags)**: Leitura de perfis do Cloud DLP (`tableDataProfiles`) e inspeção automática de esquemas e **Policy Tags** de mascaramento dinâmico nas tabelas BigQuery do projeto.
+   - **Visão 3 — Rastreabilidade & Linhagem Regulatória (Art. 8º — Data Lineage API)**: Descoberta de processos e elos de linhagem (`listProcesses` e `searchLinks`) ponta a ponta.
+   - **Visão 4 — Governança Centralizada (`lookupContext`)**: Integração nativa com o Context Engine do Knowledge Catalog (`POST /v1/projects/*/locations/*:lookupContext`) exibindo metadados e o bundle YAML pronto para agentes de IA.
+   - **Fallback Sintético Transparente**: Em projetos recém-criados ainda sem scans/perfis configurados, o painel sinaliza automaticamente o *Modo Referência Sintética* até que os primeiros ativos reais sejam criados.
 
-Abra o seu **Google Cloud Shell** (ou terminal com Google Cloud SDK instalado) e execute:
+---
+
+## 🛡️ Permissões IAM no Knowledge Catalog (Modelo Fine-Grained 2026)
+
+Com o desacoplamento de papéis IAM do **Knowledge Catalog**, papéis legados (`roles/viewer`, `roles/owner` ou apenas `roles/dataplex.viewer`) não concedem mais acesso implícito às entradas, aspectos e contextos do catálogo. Conceda aos usuários (modo OAuth) ou à Service Account do Cloud Run (modo Service Account):
+
+| Papel IAM (`Role`) | Finalidade |
+| :--- | :--- |
+| `roles/dataplex.catalogViewer` | **Obrigatório** — Busca e leitura de Entries, EntryGroups, AspectTypes, Glossários e `lookupContext` no Knowledge Catalog. |
+| `roles/dataplex.viewer` | Visualização de Data Products e recursos Dataplex. |
+| `roles/dataplex.dataScanDataViewer` | Leitura dos resultados e regras dos DataScans de Qualidade e Perfilamento. |
+| `roles/bigquery.metadataViewer` & `roles/bigquery.dataViewer` | Visibilidade de tabelas na busca ACL-aware, Policy Tags e amostras de dados. |
+| `roles/bigquery.jobUser` | Execução de consultas de amostra/qualidade quando aplicável. |
+| `roles/datalineage.viewer` | Consulta de grafos e processos na API Data Lineage (Onda 2 RC 18). |
+| `roles/dlp.reader` | Leitura de perfis de dados sensíveis no Sensitive Data Protection / Cloud DLP (Onda 1 RC 18). |
+
+---
+
+## 🚀 Opção 1: Deploy Automatizado em 1 Comando no Cloud Run (Recomendado)
+
+Qualquer usuário ou organização pode instalar a aplicação completa (Frontend + Backend em container único no Cloud Run) executando o instalador interativo no **Google Cloud Shell** ou terminal local com `gcloud`:
 
 ```bash
-# 1. Clone o repositório no seu ambiente
-git clone https://github.com/GoogleCloudPlatform/dataplex-business-user-interface.git
-cd dataplex-business-user-interface
+git clone https://github.com/vanessahay/knowledge-catalog-business-ui-rc18.git
+cd knowledge-catalog-business-ui-rc18
 
-# 2. Dê permissão de execução e rode o instalador interativo
 chmod +x deploy-gcp.sh
 ./deploy-gcp.sh
 ```
 
-**O que o instalador fará por você:**
-- Solicitará o ID do seu Projeto GCP, Região do Cloud Run e o seu Google OAuth Client ID.
-- Ativará automaticamente as APIs obrigatórias (`run`, `cloudbuild`, `artifactregistry`, `bigquery`, `dataplex`, `datacatalog`).
-- Compilará o container e implantará o Cloud Run configurando todas as variáveis de ambiente necessárias (`GOOGLE_CLOUD_PROJECT_ID`, `VITE_GOOGLE_CLIENT_ID`, etc.).
-- Ao final, exibirá a URL oficial da sua aplicação pronta para uso!
+O script `deploy-gcp.sh`:
+1. Detecta ou solicita o **GCP Project ID**, **Região** (`us-central1`, `southamerica-east1`, etc.) e **Google OAuth Client ID**.
+2. Permite escolher entre **Modo OAuth do Usuário (`IS_SERVICE_ACCOUNT=false`)** ou **Modo Service Account (`IS_SERVICE_ACCOUNT=true`)** — criando e atribuindo automaticamente as roles IAM do Knowledge Catalog à Service Account caso o modo `2` seja escolhido.
+3. Habilita todas as APIs necessárias (`dataplex`, `bigquery`, `datalineage`, `dlp`, `run`, `cloudbuild`, `artifactregistry`, `cloudresourcemanager`).
+4. Constrói a imagem via Cloud Build e publica no Cloud Run com limites seguros de escala (`--max-instances=5`).
+
+Ao final do deploy, adicione a URL gerada do Cloud Run (`https://seu-servico-xyz.run.app`) em **Authorized JavaScript origins** e **Authorized redirect URIs** (`https://seu-servico-xyz.run.app` e `https://seu-servico-xyz.run.app/auth/google/callback`) no seu cliente OAuth em `https://console.cloud.google.com/auth/clients`.
 
 ---
 
-### 🔑 2. Configuração de Credenciais OAuth (Login Institucional/G Suite)
-Para que qualquer usuário da sua empresa faça login no painel via Google Sign-In:
-1. No Console GCP, acesse **APIs & Serviços > Credenciais**.
-2. Crie ou Edite um **ID do cliente OAuth 2.0** do tipo *Aplicação Web*.
-3. Em **Origens JavaScript autorizadas**, adicione a URL gerada pelo Cloud Run (ex: `https://seu-servico-xyz.a.run.app`).
-4. Em **URIs de redirecionamento autorizados**, adicione a mesma URL terminada em `/auth/google/callback` (ex: `https://seu-servico-xyz.a.run.app/auth/google/callback`).
+## 💻 Opção 2: Executando Localmente (Desenvolvimento)
 
----
+Idêntico ao fluxo oficial do `GoogleCloudPlatform/knowledge-catalog-business-user-interface`:
 
-### 🛡️ 3. Governança, Permissões IAM e Multilocação
-A aplicação não possui travas duras e adapta-se dinamicamente às permissões dos usuários do seu projeto:
-- **Painel de Qualidade de Dados (BCB Resolução nº 18/2025)**: O backend lê automaticamente as tabelas exportadas pelo Dataplex Auto DQ (padrão: dataset `governance`, tabela `dq_results`, customizável via variáveis `DATAPLEX_DQ_DATASET` e `DATAPLEX_DQ_TABLE`). Se você selecionar uma tabela de negócios na UI, o sistema exibirá os escores de Acurácia, Completude e Consistência em tempo real.
-- **Permissões Recomendadas na Sua Organização**: Para que os colaboradores visualizem ativos e catálogos no GCP da sua empresa, garanta que tenham no IAM as roles:
-  - `roles/dataplex.viewer` (ou `roles/dataplex.admin` para administradores)
-  - `roles/bigquery.dataViewer` e `roles/bigquery.jobUser` (para consulta ao BigQuery e métricas de qualidade)
-  - `roles/datacatalog.viewer` (para busca de metadados no catálogo universal)
+### Pré-requisitos
+- **Node.js v20+**
+- Conta Google Cloud e um **OAuth 2.0 Client ID (Web Application)** configurado em `https://console.cloud.google.com/apis/credentials` com `http://localhost:5173` adicionado em *Authorized JavaScript origins* e *Authorized redirect URIs*.
 
----
-
-## Getting Started: Running Locally
-Follow these steps to set up and run the project on your local machine.
-
-### Prerequisites
-Node.js (v20 or later)
-
-An active Google Cloud account
-
-#### Step 1: Clone & Install Dependencies
-Clone the repository and install the necessary npm packages.
-
-```cmd
-git clone https://github.com/GoogleCloudPlatform/dataplex-business-user-interface
-cd dataplex-business-user-interface
+### Passo 1: Instalar dependências da raiz (Frontend)
+```bash
 npm install
 ```
 
-#### Step 2: Configure Google OAuth Client ID
-Go to the **Google Cloud Console**.
+### Passo 2: Configurar variáveis de ambiente (`.env` e `backend/.env.test`)
+Copie os templates de exemplo na raiz e na pasta `backend/`:
 
-Create a new project or select an existing one.
-
-Navigate to APIs & Services > Credentials.
-
-Click + CREATE CREDENTIALS and select OAuth client ID.
-
-Choose **Web application** as the application type.
-
-Under Authorized JavaScript origins, add http://localhost:5173.
-
-Under Authorized redirect URIs, add http://localhost:5173.
-
-Click CREATE and copy the generated **Client ID and Secret**.
-
-#### Step 3: Update Client ID in the Project
-Open the `.env` file and replace the placeholder with your actual Client ID:
-```shell
-// .env
-VITE_GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com'; // <-- PASTE YOUR ID HERE
+```bash
+cp .env.example .env
+cp backend/.env.example backend/.env.test
 ```
-#### Step 4: Run the Application
-Start the Vite development server.
 
+Edite `.env` (raiz):
+```ini
+VITE_API_URL="http://localhost:3000/api"
+VITE_API_VERSION="v1"
+VITE_ADMIN_EMAIL="seu-email@sua-empresa.com"
+VITE_GOOGLE_PROJECT_ID="seu-projeto-gcp"
+VITE_GOOGLE_CLIENT_ID="seu-client-id.apps.googleusercontent.com"
+VITE_GOOGLE_REDIRECT_URI="http://localhost:5173"
+VITE_IS_SERVICE_ACCOUNT="false"
+VITE_FEATURE_REQUEST_ACCESS="false"
+```
+
+Edite `backend/.env.test`:
+```ini
+GOOGLE_CLOUD_PROJECT_ID="seu-projeto-gcp"
+GOOGLE_REDIRECT_URI="http://localhost:3000/api/auth/callback/google"
+GCP_LOCATION=global
+GCP_REGION=global
+IS_SERVICE_ACCOUNT=false
+PORT=3000
+```
+> **Dica**: Com `IS_SERVICE_ACCOUNT=false`, todas as chamadas às APIs do Google Cloud utilizam o token OAuth do usuário logado. Se alterar para `IS_SERVICE_ACCOUNT=true`, execute antes `gcloud auth application-default login`.
+
+### Passo 3: Iniciar o Backend (Terminal 1)
+```bash
+cd backend
+npm install
+npm start
+```
+
+### Passo 4: Iniciar o Frontend (Terminal 2, na raiz do projeto)
+```bash
 npm run dev
-
-Open your browser to http://localhost:5173 to see the application running.
-
-Deployment Guide: **Google Cloud Run**
-This guide covers deploying the static frontend to **Google Cloud Run**.
-
-**Note: This deploys the frontend only, which relies on the mockApi. For a full production application, you must also deploy a secure backend to handle the token exchange logic.**
-
-For backend deployment in local you should check the readme file in backend folder
-and set the VITE_API_URL="http://localhost:8080/api" in the .env file for frontend
-if you are running your backend on other port make sure to set the api url accordingly 
-
-## Cloud Run Deployment Steps for production
-
-### Prerequisites
-You should have access to **GCP Cloud Shell** or **Google Cloud SDK (gcloud)** installed and authenticated.
-A GCP project with billing enabled.
-You should have access to cloud run, and api enable permissions in the project.
-Assumption that dataplex api and BigQuery API is enabled and you have sufficient permissions
-
-Create a OAuth client using google auth platform as it is used for authentication
-Visit here https://console.cloud.google.com/auth/clients
-The steps are already mentioned above as **step 2 in Running locally**
-In this step you would get client id and secret save it some where secure 
-
-#### Step 1: Auth to Cloud shell or Google Cloud SDK
-Login with the account in which you have access of the project for deployment
-```shell
-gcloud auth login
 ```
-#### Step 2: Set the project in which you are going to deploy this application
-Replace YOUR_PROJECT_ID with the actual Project id in the below command before running it 
-```shell
-gcloud config set project YOUR_PROJECT_ID
-```
+Acesse **`http://localhost:5173`** no navegador.
 
-#### Step 3: Enable Cloud run and artifact API's for deployment
-```shell
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com cloudresourcemanager.googleapis.com
-```
+---
 
-#### Step 4: Clone the repo into you Cloud shell or in case of Google cloud SDK clone it into the installed computer 
-```shell
-git clone https://github.com/GoogleCloudPlatform/dataplex-business-user-interface
-```
-After cloning go inside the cloned repo
-```shell
-cd dataplex-business-user-interface
-```
+## ⚙️ Configuração Opcional de Projetos e Aspectos (`backend/configData.json`)
 
-now before building the container if we want to do any default configs setting for ui change we can do that
-via changing the **configData.json** inside the backend folder 
-
-### This is manadotory if you want to use **Browse by aspects** functionality in the UI, if you don't want to use **Browse by aspects** functionality you can skip this and move on to Step 5 of deployment steps .
-
-```shell
-vi backend/configData.json // or use any code/text editor
-```
-Once you open this file you will see the json structure as mentioned below.
-
-```json
-{
-  "aspectType": {}
-}
-```
-
-Now to use browse by aspects we have to set the aspectType here in the below format.
+Assim como no repositório oficial `GoogleCloudPlatform/knowledge-catalog-business-user-interface` `v1.4.4`, você pode restringir a lista de projetos visíveis ou configurar os tipos de aspectos exibidos em **Browse by Aspects** editando `backend/configData.json` antes do build:
 
 ```json
 {
   "aspectType": {
-    // this is the format to put full name as the key and fields of aspects as value
-    "projects/{replace-project-number}/locations/{replace-location-here}/entryGroups/@dataplex/entries/{replace-aspect-id-here}_aspectType":[
-      //the below fields are just samples, please use the fields name which exists in your aspect you have mentioned in the name
-      "sales",
-      "hr",
-    ],
-    "projects/{replace-project-number}/locations/{replace-location-here}/entryGroups/@dataplex/entries/{replace-aspect-id-here}_aspectType":[
-      //the below fields are just samples, please use the fields name which exists in your aspect you have mentioned in the name
-      "marketing",
-      "domainname",
-    ],
-
-  }
+    "projects/PROJECT_NUMBER/locations/us-central1/entryGroups/@dataplex/entries/meu_aspect_aspectType": [
+      "dominio",
+      "classificacao"
+    ]
+  },
+  "assets": {},
+  "products": [],
+  "projects": []
 }
 ```
+- Deixe `"projects": []` vazio para permitir a descoberta padrão nos projetos aos quais o usuário/service account possui acesso, ou informe IDs específicos (`["projeto-dados-1", "projeto-dados-2"]`) para restringir o escopo.
 
-To populate the aspects name you need project-number, location of the apsects, and aspect type id
-Folllow these steps to get the values for configuration:
-1. Open the **GCP Console**
-2. Open the sidebar **cloud overview** and the select **Dashboard**.
-3. Here you can see the project number.
-4. Copy the project number and replace it in the name.
-  `projects/1069*****1809/locations/{replace-location-here}/entryGroups/@dataplex/entries/{replace-aspect-id-here}_aspectType`
-5. Now go to **Knowledge Catalog**.
-6. Search for the name of the aspect and open the detail view.
-7. In here you can find the aspect type id, location and we already have the project number from the previous steps using that our name would be.
-  `projects/1069*****1809/locations/us-central1/entryGroups/@dataplex/entries/aspecttype3_aspectType`.
-8. Now to get the field values we can see in the same details screen we have the fields mentioned.
-9. Copy the names create the string array with the name and use all small cases in here.
-10. Now the json file would look like this.
-```json
-{
-  "aspectType": {
-    "projects/1069*****1809/locations/us-central1/entryGroups/@dataplex/entries/aspecttype3_aspectType":[
-      "sales",
-      "finance",
-      "marketing",
-    ],
-    //you can add more aspects here 
-  }
-}
-```
-11. You can add as many aspects you want in the same manner.
-12. And save this in configData.json under backend folder.
+---
 
+## 🛠️ Deploy Manual no Cloud Run (via CLI `gcloud`)
 
-**Now you are done with the aspects configuration for browse by funationality**
+Caso prefira executar os comandos manualmente (sem `deploy-gcp.sh`):
 
-#### Step 5: Create the artifact repository to store the container artifact, this command require to run only once for the deployment if you are redeplying skip this step
-Replace `[REPO_NAME]` with the name you want to give like (dataplex-business-ui-artifact, etc.) and set up your preferred region by setting that in --location flag below command is using `us-central1` but you can replace it but make sure if you replace it then use the same region in below steps by replacing `us-central1` with the the used value.
-```shell
-gcloud artifacts repositories create `[REPO_NAME]` --repository-format=docker --location=us-central1 --description="Docker repository for dataplex-business-ui project"
-```
+```bash
+export PROJECT_ID="seu-projeto-gcp"
+export REGION="us-central1"
+export REPO_NAME="knowledge-catalog-ui-repo"
+export SERVICE_NAME="knowledge-catalog-ui"
+export CLIENT_ID="seu-client-id.apps.googleusercontent.com"
+export ADMIN_EMAIL="admin@sua-empresa.com"
 
-#### Step 6 Build the Docker Image with Cloud Build
-Submit your project to **Google Cloud Build** to create a container image. Replace `[PROJECT_ID]`with your GCP Project ID,
-`[REPO_NAME]` which you created in step 5 and `[APP_NAME]`with your desired application name.
+gcloud config set project "$PROJECT_ID"
 
-```shell
-gcloud builds submit . --tag us-central1-docker.pkg.dev/[PROJECT_ID]/[REPO_NAME]/[APP_NAME]:latest
-```
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com cloudresourcemanager.googleapis.com \
+  bigquery.googleapis.com dataplex.googleapis.com datalineage.googleapis.com dlp.googleapis.com
 
-#### Step 7: Deploy to Cloud Run
-Replace the [PROJECT_ID],[REPO_NAME],[APP_NAME] with the value you have used above and replace [SERVICE_NAME] with the name you want to set your cloud run service, [ADMIN_EMAIL_ID] to your admin email you want to set, then the most important replace the [CLIENT_ID] with the **OAuth credentials** you created in earlier steps.
+gcloud artifacts repositories create "$REPO_NAME" \
+  --repository-format=docker --location="$REGION"
 
-Deploy the container image you just built to **Cloud Run** using the below command after replacing the mentioned values.
-After successful deployment it will return a url to access the application.
+gcloud builds submit . --tag "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}:latest"
 
-```shell
-gcloud run deploy [SERVICE_NAME] \
-  --image us-central1-docker.pkg.dev/[PROJECT_ID]/[REPO_NAME]/[APP_NAME]:latest \
+gcloud run deploy "$SERVICE_NAME" \
+  --image "${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO_NAME}/${SERVICE_NAME}:latest" \
   --platform managed \
-  --region us-central1 \
+  --region "$REGION" \
   --allow-unauthenticated \
   --port 8080 \
-  --set-env-vars  VITE_API_URL="/api" \
-  --set-env-vars  VITE_API_VERSION="v1" \
-  --set-env-vars  VITE_ADMIN_EMAIL="[ADMIN_EMAIL_ID]" \
-  --set-env-vars  VITE_GOOGLE_PROJECT_ID="[PROJECT_ID]" \
-  --set-env-vars  VITE_GOOGLE_CLIENT_ID="[CLIENT_ID]" \
-  --set-env-vars  VITE_GOOGLE_REDIRECT_URI="/auth/google/callback" \
-  --set-env-vars  GOOGLE_CLOUD_PROJECT_ID="[PROJECT_ID]" \
-  --set-env-vars  GCP_LOCATION="global" \
-  --set-env-vars  GCP_REGION="global"
+  --max-instances=5 \
+  --concurrency=80 \
+  --timeout=60s \
+  --set-env-vars="VITE_API_URL=/api,VITE_API_VERSION=v1,VITE_ADMIN_EMAIL=${ADMIN_EMAIL},VITE_GOOGLE_PROJECT_ID=${PROJECT_ID},VITE_GOOGLE_CLIENT_ID=${CLIENT_ID},VITE_GOOGLE_REDIRECT_URI=/auth/google/callback,VITE_IS_SERVICE_ACCOUNT=false,VITE_FEATURE_REQUEST_ACCESS=false,GOOGLE_CLOUD_PROJECT_ID=${PROJECT_ID},GCP_LOCATION=global,GCP_REGION=global,IS_SERVICE_ACCOUNT=false"
 ```
-**--platform managed**: Specifies the fully managed Cloud Run environment.
-
-**--region**: Choose a region that is close to you.
-
-**--allow-unauthenticated**: Makes the frontend publicly accessible.
-
-If you don't want it to be publicly accessible please use **--no-allow-unauthenticated** flag, but then you need to add the users manually to IAP(Identity Aware proxy) in the cloud run security tab of your app, or you can create a group add that group into you project and IAP(Identity Aware proxy) and assign users to that group.
-
-Also if your organisation policy enforce the **Domain Restricted Sharing** then you also have to add the users to IAP(Identity Aware proxy) for security reasons.
-
-Cloud Run will provide you with a public URL for your service or IAP accessible URL accordingly.
-
-#### Step 8: Update OAuth Credentials for Production
-Go back to your **Google Cloud Console** > Credentials page.
-
-Edit your Web application client ID.
-
-Add the URL provided by **Cloud Run** (e.g., https://your-app-name-....run.app) to the Authorized JavaScript origins and Authorized redirect URIs.
-
-Save your changes.
-
-**Your application is now deployed and accessible, with both front-end and backend in one single container and cloud run service!**
- 
-### For redeployment follow the steps below 
-
-#### Step 1: Pull the latest changes from the code repository
-if you want to redeploy the changes with the latest codes.
-Go to the repository folder inside the cloud shell and run the command below.
-
-```shell
-git pull
-```
-
-#### Step 2: Modify the backend/configData.json if required
-if you want any changes in your backend/configData.json for the browse experience, you can do so or if you don't want the changes in that use the same file. 
-for modification of the configData.json file run the command below.
-```shell
-vi backend/configData.json
-```
-
-#### Step 3: we have to re build the Docker Image with Cloud Build
-Submit your project to **Google Cloud Build** to create a container image. Replace `[PROJECT_ID]`with your GCP Project ID,
-`[REPO_NAME]` which you created in step 5 and `[APP_NAME]`with your desired application name.
-
-```shell
-gcloud builds submit . --tag us-central1-docker.pkg.dev/[PROJECT_ID]/[REPO_NAME]/[APP_NAME]:latest
-```
-
-#### Step 4: Deploy to Cloud Run
-Replace the [PROJECT_ID],[REPO_NAME],[APP_NAME] with the value you have used above and replace [SERVICE_NAME] with the name you want to set your cloud run service, [ADMIN_EMAIL_ID] to your admin email you want to set, then the most important replace the [CLIENT_ID] and [CLIENT_SCERET] with the **OAuth credentials** you created in earlier steps.
-
-Deploy the container image you just built to Cloud Run using the below command after replacing the mentioned values.
-After successful deployment it will return a url to access the application.
-
-```shell
-gcloud run deploy [SERVICE_NAME] \
-  --image us-central1-docker.pkg.dev/[PROJECT_ID]/[REPO_NAME]/[APP_NAME]:latest \
-  --platform managed \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --port 8080 \
-  --set-env-vars  VITE_API_URL="/api" \
-  --set-env-vars  VITE_API_VERSION="v1" \
-  --set-env-vars  VITE_ADMIN_EMAIL="[ADMIN_EMAIL_ID]" \
-  --set-env-vars  VITE_GOOGLE_PROJECT_ID="[PROJECT_ID]" \
-  --set-env-vars  VITE_GOOGLE_CLIENT_ID="[CLIENT_ID]" \
-  --set-env-vars  VITE_GOOGLE_REDIRECT_URI="/auth/google/callback" \
-  --set-env-vars  GOOGLE_CLOUD_PROJECT_ID="[PROJECT_ID]" \
-  --set-env-vars  GCP_LOCATION="global" \
-  --set-env-vars  GCP_REGION="global"
-```
-
-**Your application is now redeployed and accessible, with both front-end and backend in one single container and cloud run service!**
-
-
-## Release Note : 1.4.0
-This is a minor release with features, identified bug/fixes and some user interface changes.
-Feature Enhancements:
-
-  - API optimizations and performance
-  - Debouncing added for large list for project and other large filter list
-  - Dataproduct UI revamped end to end
-  - New Access Request workflow implemented for Dataproduct as per GCP console.
-  - UI component modifications for multiple components
-  - - Cards
-  - - Buttons
-  - - Icons
-  - - Tags
-  - - Tabs Style
-  - - Side Nav
-
-Bug Fixes:
-
-  - Insights and Data profile / Data Quality Scans are not visible in some cases
-  - List loading issue in larger list of filters and sub-filter modals.

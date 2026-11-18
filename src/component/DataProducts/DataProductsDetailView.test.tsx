@@ -2,11 +2,13 @@
 import { render, screen, fireEvent, act } from '@testing-library/react';
 import DataProductsDetailView from './DataProductsDetailView';
 import { AuthContext } from '../../auth/AuthProvider';
+import { AppBootstrapContext, type AppBootstrapStatus } from '../../hooks/useAppBootstrap';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import '@testing-library/jest-dom';
 import { BrowserRouter } from 'react-router-dom';
 import { Provider } from 'react-redux';
 import { configureStore } from '@reduxjs/toolkit';
+import { fetchDataProductsList } from '../../features/dataProducts/dataProductsSlice';
 
 // Mock react-router-dom
 const mockNavigate = vi.fn();
@@ -341,15 +343,25 @@ const defaultStoreState = {
 // TEST HELPER
 // ================================================================================
 
+const defaultBootstrapStatus: AppBootstrapStatus = {
+  isAppConfigReady: true,
+  areProjectsReady: true,
+  isProjectMappingReady: true,
+  isBootstrapping: false,
+};
+
 const renderWithProviders = (
   component: React.ReactElement,
-  storeState: any = defaultStoreState
+  storeState: any = defaultStoreState,
+  bootstrapStatus: AppBootstrapStatus = defaultBootstrapStatus
 ) => {
   const store = createMockStore(storeState);
 
-  // Mock localStorage
+  // Mock localStorage. `name: null` matches dataProductIdFromUrl in tests, which is
+  // always null since no test sets a dataProductId search param - keeps the cached
+  // value "valid" per DataProductsDetailView's stale-cache guard.
   const localStorageMock = {
-    getItem: vi.fn(() => JSON.stringify({ icon: 'iVBORw0KGgo' })),
+    getItem: vi.fn(() => JSON.stringify({ icon: 'iVBORw0KGgo', name: null })),
     setItem: vi.fn(),
     removeItem: vi.fn(),
     clear: vi.fn()
@@ -360,7 +372,9 @@ const renderWithProviders = (
     <Provider store={store}>
       <BrowserRouter>
         <AuthContext.Provider value={mockAuthContext}>
-          {component}
+          <AppBootstrapContext.Provider value={bootstrapStatus}>
+            {component}
+          </AppBootstrapContext.Provider>
         </AuthContext.Provider>
       </BrowserRouter>
     </Provider>
@@ -580,7 +594,7 @@ describe('DataProductsDetailView', () => {
       const backButton = document.querySelector('button[class*="MuiButton"]');
       if (backButton) {
         fireEvent.click(backButton);
-        expect(mockNavigate).toHaveBeenCalledWith(-1);
+        expect(mockNavigate).toHaveBeenCalledWith('/data-products');
       }
     });
   });
@@ -812,6 +826,41 @@ describe('DataProductsDetailView', () => {
 
       expect(mockNavigate).toHaveBeenCalledWith('/data-products');
     });
+
+    it('shows an inline access-denied state instead of navigating away on PERMISSION_DENIED', () => {
+      const permissionDeniedState = {
+        ...defaultStoreState,
+        dataProducts: {
+          ...defaultStoreState.dataProducts,
+          selectedDataProductStatus: 'failed',
+          selectedDataProductError: {
+            type: 'PERMISSION_DENIED',
+            message: "You don't have access to this resource",
+            itemId: 'projects/test-project/locations/us/dataProducts/test-product',
+          },
+        },
+      };
+
+      renderWithProviders(<DataProductsDetailView />, permissionDeniedState);
+
+      // No raw-JSON toast, no forced redirect.
+      expect(mockShowError).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(mockNavigate).not.toHaveBeenCalledWith('/data-products');
+
+      // The inline Access Denied card renders instead.
+      expect(screen.getByText('Access Denied')).toBeInTheDocument();
+      // The top-level product card (with the Request Access CTA) still shows,
+      // built from the list-item data cached at click-time.
+      expect(screen.getByText('Request Access')).toBeInTheDocument();
+      // The tab bar still renders for a consistent look, even though every
+      // tab's content is unavailable without access.
+      expect(screen.getByText('Overview')).toBeInTheDocument();
+      expect(screen.getByText('Assets')).toBeInTheDocument();
+    });
   });
 
   describe('Data Fetching', () => {
@@ -834,6 +883,47 @@ describe('DataProductsDetailView', () => {
       renderWithProviders(<DataProductsDetailView />);
 
       expect(mockDispatch).toHaveBeenCalled();
+    });
+
+    it('does NOT dispatch fetchDataProductsList while the project mapping is not ready, even if items are empty and status is idle', () => {
+      // Gated on isProjectMappingReady rather than isBootstrapping: a failed
+      // /get-projects satisfies isBootstrapping but leaves the id->number
+      // mapping empty, so the list fetch must wait for the mapping itself.
+      const emptyState = {
+        ...defaultStoreState,
+        dataProducts: {
+          ...defaultStoreState.dataProducts,
+          dataProductsItems: [],
+          status: 'idle'
+        }
+      };
+
+      renderWithProviders(<DataProductsDetailView />, emptyState, {
+        ...defaultBootstrapStatus,
+        isProjectMappingReady: false,
+      });
+
+      expect(fetchDataProductsList).not.toHaveBeenCalled();
+    });
+
+    it('dispatches fetchDataProductsList once the project mapping is ready, items are empty and status is idle', () => {
+      const emptyState = {
+        ...defaultStoreState,
+        dataProducts: {
+          ...defaultStoreState.dataProducts,
+          dataProductsItems: [],
+          status: 'idle'
+        }
+      };
+
+      renderWithProviders(<DataProductsDetailView />, emptyState, {
+        ...defaultBootstrapStatus,
+        isProjectMappingReady: true,
+      });
+
+      expect(fetchDataProductsList).toHaveBeenCalledWith(
+        expect.objectContaining({ id_token: mockAuthContext.user.token })
+      );
     });
   });
 

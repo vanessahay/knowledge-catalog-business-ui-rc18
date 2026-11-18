@@ -22,7 +22,7 @@ const SendFeedback: React.FC<SendFeedbackProps> = ({ isOpen, onClose, onSubmitSu
   const [error, setError] = useState<string | null>(null);
   const contactEmails:string[] = [
     import.meta.env.VITE_SUPPORT_EMAIL || import.meta.env.VITE_ADMIN_EMAIL, 
-    "dataplex-interface-feedback@google.com"
+    "dataplex-interface-feedback@example.com"
   ];
   const [success, setSuccess] = useState(false);
   const { user } = useAuth();

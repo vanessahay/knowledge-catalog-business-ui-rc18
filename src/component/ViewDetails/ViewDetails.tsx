@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
-import { Box, IconButton, Tab, Tabs, Skeleton } from '@mui/material'
-import { ArrowBack, KeyboardArrowUp, KeyboardArrowDown, DashboardOutlined, Inventory2Outlined, BadgeOutlined, TimelineOutlined, WorkspacePremiumOutlined, CategoryOutlined, ArticleOutlined } from '@mui/icons-material'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { Box, IconButton, Tab, Tabs, Skeleton, Tooltip } from '@mui/material'
+import { ArrowBack, KeyboardArrowUp, KeyboardArrowDown, DashboardOutlined, Inventory2Outlined, BadgeOutlined, TimelineOutlined, WorkspacePremiumOutlined, CategoryOutlined, ArticleOutlined, LinkOutlined } from '@mui/icons-material'
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
 import ConditionalTooltip from '../Common/ConditionalTooltip'
 import CustomTabPanel from '../TabPanel/CustomTabPanel'
@@ -12,11 +12,12 @@ import DetailPageOverview from '../DetailPageOverview/DetailPageOverview'
 import DetailPageOverviewSkeleton from '../DetailPageOverview/DetailPageOverviewSkeleton'
 import Lineage from '../Lineage'
 import DataQuality from '../DataQuality/DataQuality'
+import { extractDataQualityScorecard } from '../DataQuality/aspectScorecard'
 import DataProfile from '../DataProfile/DataProfile'
 import EntryList from '../EntryList/EntryList'
 import type { AppDispatch } from '../../app/store'
 import { getSampleData } from '../../features/sample-data/sampleDataSlice'
-import { popFromHistory, pushToHistory, fetchEntry, fetchEntryLinks } from '../../features/entry/entrySlice'
+import { popFromHistory, pushToHistory, clearPendingTab, fetchEntry, fetchEntryLinks } from '../../features/entry/entrySlice'
 import type { GlossaryItem } from '../Glossaries/GlossaryDataType'
 import { fetchAllDataScans, selectAllScans, selectAllScansStatus } from '../../features/dataScan/dataScanSlice';
 import { useAuth } from '../../auth/AuthProvider'
@@ -35,6 +36,7 @@ import GlossariesSynonyms from '../Glossaries/GlossariesSynonyms';
 import GlossariesSynonymsSkeleton from '../Glossaries/GlossariesSynonymsSkeleton';
 import ResourcePreview from '../Common/ResourcePreview';
 import TableInsights from '../TableInsights/TableInsights'
+import DatasetInsights from '../TableInsights/DatasetInsights'
 import { useNoAccess } from '../../contexts/NoAccessContext';
 // import { useFavorite } from '../../hooks/useFavorite'
 
@@ -103,6 +105,7 @@ const ViewDetails = () => {
   const entryStatus = useSelector((state: any) => state.entry.status);
   const entryError = useSelector((state: any) => state.entry.error);
   const entryHistory = useSelector((state: any) => state.entry.history);
+  const pendingTabName = useSelector((state: any) => state.entry.pendingTabName);
   const entryLinks = useSelector((state: any) => state.entry.entryLinks) as GlossaryItem[];
   const entryLinksStatus = useSelector((state: any) => state.entry.entryLinksStatus);
   const { triggerNoAccess } = useNoAccess();
@@ -117,12 +120,16 @@ const ViewDetails = () => {
   const allScansStatus = useSelector(selectAllScansStatus);
   const initialTabName = (location.state as any)?.tabName as string | undefined;
   const tabNameApplied = React.useRef(false);
+  const urlEntryFetchedRef = React.useRef(false);
+  const [searchParams] = useSearchParams();
+  const [copyLinkSuccess, setCopyLinkSuccess] = useState(false);
   const [tabValue, setTabValue] = React.useState(0);
   const [sampleTableData, setSampleTableData] = React.useState<any>();
   const [filteredEntry, setFilteredEntry] = useState<any>(null);
   const [loading, setLoading] = React.useState<boolean>(true);
   const [expandedAnnotations, setExpandedAnnotations] = useState<Set<string>>(new Set());
   const [dqScanName, setDqScanName] = useState<string | null>(null);
+  const aspectScorecard = useMemo(() => extractDataQualityScorecard(entry), [entry]);
   const [dpScanName, setDpScanName] = useState<string | null>(null);
   const [tableInsightsScanName, setTableInsightsScanName] = useState<string | null>(null);
 
@@ -165,14 +172,42 @@ const ViewDetails = () => {
       setExpandedAnnotations(new Set(annotationKeys));
     }
   };
+  // Inverse of resolveTabName: numeric tab index → tab name string for URL params
+  const resolveTabIndex = (index: number): string => {
+    const type = getEntryType(entry?.name || '', '/');
+    const isBQTable = type === 'Tables' && entry?.entrySource?.system?.toLowerCase() === 'bigquery';
+    const gType = getGlossaryType(entry);
+    if (isBQTable) return (['overview','aspects','terms','lineage','dataProfile','dataQuality','insights'] as const)[index] ?? 'overview';
+    if (type === 'Datasets') return (['overview','entryList','aspects','terms','insights'] as const)[index] ?? 'overview';
+    if (gType === 'glossary' || gType === 'category') return (['overview','categories','terms','aspects'] as const)[index] ?? 'overview';
+    if (gType === 'term') return (['overview','linkedAssets','synonyms','aspects'] as const)[index] ?? 'overview';
+    if (type === 'Entries') return (['overview','aspects'] as const)[index] ?? 'overview';
+    return (['overview','aspects','terms'] as const)[index] ?? 'overview';
+  };
+
   const handleTabChange = (_event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue);
+
+    if (entry?.name) {
+      navigate(`/view-details?entry=${encodeURIComponent(btoa(entry.name))}&tab=${resolveTabIndex(newValue)}`, { replace: true });
+    }
 
     // Auto-close asset preview on tab switch
     if (isAssetPreviewOpen) {
       setIsAssetPreviewOpen(false);
       setAssetPreviewData(null);
     }
+  };
+
+  const handleCopyLink = () => {
+    if (!entry?.name) return;
+    const encoded = encodeURIComponent(btoa(entry.name));
+    const tabName = resolveTabIndex(tabValue);
+    const url = `${window.location.origin}/view-details?entry=${encoded}&tab=${tabName}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopyLinkSuccess(true);
+      setTimeout(() => setCopyLinkSuccess(false), 2000);
+    });
   };
   
 
@@ -184,12 +219,12 @@ const ViewDetails = () => {
   }
 
   const goBack = () => {
-    // Check if we have entry history to go back to
     if (entryHistory && entryHistory.length > 0) {
-      // Pop the last entry from history and set it as current
       dispatch(popFromHistory());
+    } else if (location.key === 'default' || (location.state as any)?.fromAuth) {
+      // Direct link arrival OR post-login redirect — go to landing page
+      navigate('/home');
     } else {
-      // If no history, fall back to browser navigation
       navigate(-1);
     }
   };
@@ -338,19 +373,19 @@ const ViewDetails = () => {
   const bigQueryLink = generateBigQueryLink(displayEntry);
   const lookerLink = generateLookerStudioLink(displayEntry);
 
-  const headerDescription = displayEntry?.entrySource?.description || '';
+  const headerDescription = (displayEntry?.entrySource?.description || '').trim();
 
 let annotationTab = (
-  <Box sx={{ 
-    flex: 1, 
-    overflowY: "auto", 
+  <Box sx={{
+    flex: 1,
+    overflowY: "auto",
     minHeight: 0,
     border: '1px solid #DADCE0',
     borderRadius: '12px',
     backgroundColor: '#FFFFFF',
-    overflow: 'hidden',
+    overflowX: 'hidden',
     marginRight: '8px',
-    marginTop: '12px' 
+    marginTop: '12px'
   }}>
     <PreviewAnnotation
       entry={filteredEntry || displayEntry}
@@ -387,6 +422,31 @@ let overviewTab = <DetailPageOverview entry={displayEntry} css={{width:"100%"}} 
     }
   }, []);//[dispatch, id_token, allScansStatus]);
 
+  // Bootstrap from URL ?entry= param (token available on mount)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const entryParam = searchParams.get('entry');
+    if (!entryParam) return;
+    const decoded = atob(entryParam);
+    if (entry?.name === decoded) { urlEntryFetchedRef.current = true; return; }
+    if (id_token) {
+      urlEntryFetchedRef.current = true;
+      dispatch(fetchEntry({ entryName: decoded, id_token }));
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bootstrap from URL ?entry= param (token resolves async on page reload)
+  useEffect(() => {
+    if (urlEntryFetchedRef.current) return;
+    const entryParam = searchParams.get('entry');
+    if (!entryParam || !id_token) return;
+    const decoded = atob(entryParam);
+    if (entry?.name !== decoded) {
+      dispatch(fetchEntry({ entryName: decoded, id_token }));
+    }
+    urlEntryFetchedRef.current = true;
+  }, [id_token]); // eslint-disable-line react-hooks/exhaustive-deps
+
 useEffect(() => {
     // Don't update scans if preview is open
     if (isAssetPreviewOpen) return;
@@ -422,20 +482,20 @@ useEffect(() => {
 
       const tableInsightsScanFiltered = allScans.filter(
         (scan: any) =>{
-          console.log("Checking scan:", scan.name, "for resource:", resourceName, "with type:", scan.type);
+          // console.log("Checking scan:", scan.name, "for resource:", resourceName, "with type:", scan.type);
           return (scan.data.resource === '//bigquery.googleapis.com/'+resourceName && (scan.type === 'DATA_DOCUMENTATION' || scan.type === 4))
         }
       );
-      console.log("Table Insights Scans filtered:", tableInsightsScanFiltered);
+      // console.log("Table Insights Scans filtered:", tableInsightsScanFiltered);
 
       let tableInsightsScan = tableInsightsScanFiltered.length > 0 ? tableInsightsScanFiltered.reduce((latest:any, current:any) => {
         return new Date(current.updateTime.seconds * 1000) < new Date(latest.updateTime.seconds * 1000) ? current : latest;
       }) : null;
 
-      console.log("Table Insights Scans found:", tableInsightsScan);
+      // console.log("Table Insights Scans found:", tableInsightsScan);
 
       setTableInsightsScanName(tableInsightsScan ? tableInsightsScan?.name : null);
-      console.log(`tableInsightsScanName for resource [${resourceName}]:`, tableInsightsScanName);
+      // console.log(`tableInsightsScanName for resource [${resourceName}]:`, tableInsightsScanName);
     }
   }, [entry, entryStatus, allScans, allScansStatus, entry?.entrySource?.resource, isAssetPreviewOpen]);
   useEffect(() => {
@@ -533,10 +593,21 @@ useEffect(() => {
     if (isAssetPreviewOpen) return;
 
     if (entry) {
-      setTabValue(0);
+      // Restore the tab active before a back-navigation (set by popFromHistory),
+      // otherwise default to Overview.
+      if (pendingTabName) {
+        setTabValue(resolveTabName(pendingTabName));
+        dispatch(clearPendingTab());
+      } else {
+        setTabValue(0);
+      }
       setContentSearchTerm('');
       setRelationFilter('all');
-      setFetchedEntryId(null);
+      // Don't drop the glossary-details cache when restoring from history (Back) —
+      // it would trigger a needless refetch of the entry we already have.
+      if (!pendingTabName) {
+        setFetchedEntryId(null);
+      }
       setAssetPreviewData(null);
       setIsAssetPreviewOpen(false);
       setTermsSearch('');
@@ -550,16 +621,20 @@ useEffect(() => {
     if (!entry?.name || !id_token || entryStatus !== 'succeeded') return;
     const gType = getGlossaryType(entry);
     const isGlossaryLike = gType === 'glossary' || gType === 'category' || gType === 'term';
-    if (!isGlossaryLike) {
+    // entryLinksStatus is reset to 'idle' by fetchEntry.pending for every entry change
+    // (including back-navigation), so gating on it (rather than a local "already
+    // fetched" cache) stays correct across any navigation path.
+    if (!isGlossaryLike && entryLinksStatus === 'idle') {
       dispatch(fetchEntryLinks({ entryName: entry.name, id_token }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry?.name, entryStatus, id_token, isAssetPreviewOpen, dispatch]);
+  }, [entry?.name, entryStatus, entryLinksStatus, id_token, isAssetPreviewOpen, dispatch]);
 
   // Resolve a tab name (e.g. 'aspects', 'lineage') to a numeric index based on entry type
   const resolveTabName = (tabName: string): number => {
     const type = getEntryType(entry.name, '/');
     const isBigQueryTable = type === 'Tables' && entry.entrySource?.system?.toLowerCase() === 'bigquery';
+    const isLooker = entry.entrySource?.system?.toLowerCase() === 'looker';
     const gType = getGlossaryType(entry);
 
     if (isBigQueryTable) {
@@ -568,6 +643,10 @@ useEffect(() => {
     }
     if (type === 'Datasets') {
       const map: Record<string, number> = { overview: 0, entryList: 1, aspects: 2, terms: 3, insights: 4 };
+      return map[tabName] ?? 0;
+    }
+    if (isLooker) {
+      const map: Record<string, number> = { overview: 0, entryList: 1, aspects: 2, lineage: 3, terms: 4 };
       return map[tabName] ?? 0;
     }
     if (gType === 'glossary' || gType === 'category') {
@@ -587,10 +666,13 @@ useEffect(() => {
     return map[tabName] ?? 0;
   };
 
-  // Apply tabName from route state when the new entry finishes loading
+  // Apply tabName from route state or URL ?tab param when the new entry finishes loading
   useEffect(() => {
-    if (!tabNameApplied.current && initialTabName && entryStatus === 'succeeded' && entry) {
-      setTabValue(resolveTabName(initialTabName));
+    if (!tabNameApplied.current && entryStatus === 'succeeded' && entry) {
+      const tabToApply = initialTabName ?? searchParams.get('tab') ?? undefined;
+      if (tabToApply) {
+        setTabValue(resolveTabName(tabToApply));
+      }
       tabNameApplied.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -602,11 +684,11 @@ useEffect(() => {
   // Terms tab content for non-glossary entries (linked glossary terms via lookupEntryLinks)
   const linkedTermsTab = (
     entryLinksStatus === 'loading' ? (
-      <Box sx={{ height: '100%' }}>
+      <Box sx={{ height: '100%', marginTop: '-2px' }}>
         <GlossariesCategoriesTermsSkeleton />
       </Box>
     ) : (
-      <Box sx={{ height: '100%', minHeight: 'calc(100vh - 350px)' }}>
+      <Box sx={{ height: '100%', minHeight: 'calc(100vh - 350px)', marginTop: '-2px' }}>
         <GlossariesCategoriesTerms
           mode="terms"
           items={sortedEntryLinks}
@@ -730,9 +812,9 @@ const ctaButtons = (
 
   const showCta = displayEntry.entrySource?.system?.toLowerCase() === 'bigquery';
 
-  const headerTitle = displayEntry.entrySource.displayName.length > 0
+  const headerTitle = (displayEntry?.entrySource?.displayName?.length ?? 0) > 0
     ? displayEntry.entrySource.displayName
-    : getName(displayEntry.name || '', '/');
+    : getName(displayEntry?.name || '', '/');
 
   // Dynamic tab items, reused in the normal nav bar + compact sticky tab bar
   const tabItems = getEntryType(displayEntry.name, '/') === 'Tables' && displayEntry.entrySource?.system.toLowerCase() === 'bigquery' ? [
@@ -749,6 +831,12 @@ const ctaButtons = (
     <Tab key="annotations" icon={<span className="material-symbols-outlined" style={{ fontSize: "20px", display: "inline-block", verticalAlign: "middle" }}>newsmode</span>} iconPosition="start" label="Aspects" {...tabProps(2)} />,
     <Tab key="terms" icon={<ArticleOutlined sx={{ fontSize: "20px" }} />} iconPosition="start" label="Glossary Terms" {...tabProps(3)} />,
     <Tab key="insights" icon={<span className="material-symbols-outlined" style={{ fontSize: "20px", display: "inline-block", verticalAlign: "middle" }}>query_stats</span>} iconPosition="start" label="Insights" {...tabProps(4)} />
+  ] : displayEntry.entrySource?.system?.toLowerCase() === 'looker' ? [
+    <Tab key="overview" icon={<DashboardOutlined sx={{ fontSize: "20px" }} />} iconPosition="start" label="Overview" {...tabProps(0)} />,
+    <Tab key="entryList" icon={<Inventory2Outlined sx={{ fontSize: "20px" }} />} iconPosition="start" label="Entry List" {...tabProps(1)} />,
+    <Tab key="annotations" icon={<span className="material-symbols-outlined" style={{ fontSize: "20px", display: "inline-block", verticalAlign: "middle" }}>newsmode</span>} iconPosition="start" label="Aspects" {...tabProps(2)} />,
+    <Tab key="lineage" icon={<TimelineOutlined sx={{ fontSize: "20px" }} />} iconPosition="start" label="Lineage" {...tabProps(3)} />,
+    <Tab key="terms" icon={<ArticleOutlined sx={{ fontSize: "20px" }} />} iconPosition="start" label="Glossary Terms" {...tabProps(4)} />,
   ] : glossaryType === 'glossary' || glossaryType === 'category' ? [
     <Tab key="overview" icon={<DashboardOutlined sx={{ fontSize: "20px" }} />} iconPosition="start" label="Overview" {...tabProps(0)} />,
     <Tab key="categories" icon={<CategoryOutlined sx={{ fontSize: "20px" }} />} iconPosition="start" label="Categories" {...tabProps(1)} />,
@@ -769,7 +857,7 @@ const ctaButtons = (
   ];
 
   return (
-    <div ref={scrollContainerRef} onScroll={handleScroll} style={{display: "flex", flexDirection: "column", padding: "0px 0", background:"#F7F9F9", height: "100%", overflowY: "auto" }}>
+    <div ref={scrollContainerRef} onScroll={handleScroll} style={{display: "flex", flexDirection: "column", padding: "0px 0", background:"#f9fafc", height: "100%", overflowY: "auto" }}>
       {loading ? (
         <div style={{display: "flex", flexDirection: "column", flex: 1}}>
           
@@ -839,7 +927,7 @@ const ctaButtons = (
                             gap: isScrolled ? "12px" : "0px",
                             position: "sticky",
                             top: 0,
-                            backgroundColor: isScrolled ? "#F9F9FC" : "#F7F9F9",
+                            backgroundColor: isScrolled ? "#F9F9FC" : "#f9fafc",
                             zIndex: 1001,
                             boxShadow: isScrolled ? "0px 1px 6.6px rgba(171, 171, 179, 0.5)" : "none",
                             transition: "all 0.2s ease",
@@ -892,11 +980,14 @@ const ctaButtons = (
                                 </ConditionalTooltip>
                                 </div>
 
-                                {showCta && (
-                                  <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
-                                    {ctaButtons}
-                                  </div>
-                                )}
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+                                  {showCta && ctaButtons}
+                                  <Tooltip title={copyLinkSuccess ? 'Link copied!' : 'Copy link'} placement="bottom">
+                                    <IconButton onClick={handleCopyLink} size="small" sx={{ border: '1px solid #DADCE0', borderRadius: '100px', padding: '8px', color: '#022FCD', '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' } }}>
+                                      <LinkOutlined sx={{ fontSize: '20px' }} />
+                                    </IconButton>
+                                  </Tooltip>
+                                </div>
                               </div>
 
                               {/* Scrolled State: Tabs Container */}
@@ -1017,7 +1108,7 @@ const ctaButtons = (
                             {/* Tags */}
                             <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                                 <Tag
-                                    text={(() => { const sys = displayEntry.entrySource.system; if (!sys) return 'Custom'; const lower = sys.toLowerCase(); if (lower === 'dataplex universal catalog' || lower === 'dataplex') return 'Knowledge Catalog'; if (lower === 'bigquery') return 'BigQuery'; return sys.replace("_", " ").replace("-", " ").toLowerCase(); })()}
+                                    text={(() => { const sys = displayEntry?.entrySource?.system; if (!sys) return 'Custom'; const lower = sys.toLowerCase(); if (lower === 'dataplex universal catalog' || lower === 'dataplex') return 'Knowledge Catalog'; if (lower === 'bigquery') return 'BigQuery'; return sys.replace("_", " ").replace("-", " ").toLowerCase(); })()}
                                     css={{
                                         fontFamily: '"Google Sans", sans-serif',
                                         backgroundColor: 'rgba(7, 106, 255, 0.1)',
@@ -1065,12 +1156,15 @@ const ctaButtons = (
                         </div>
                     </div>
 
-                    {/* Top-right CTA Buttons */}
-                    {showCta && (
-                      <div style={{ position: "absolute", top: "24px", right: "24px", display: "flex", alignItems: "center", gap: "8px" }}>
-                        {ctaButtons}
-                      </div>
-                    )}
+                    {/* Top-right CTA Buttons + Copy Link */}
+                    <div style={{ position: "absolute", top: "24px", right: "24px", display: "flex", alignItems: "center", gap: "8px" }}>
+                      {showCta && ctaButtons}
+                      <Tooltip title={copyLinkSuccess ? 'Link copied!' : 'Copy link'} placement="bottom">
+                        <IconButton onClick={handleCopyLink} size="small" sx={{ border: '1px solid #DADCE0', borderRadius: '100px', padding: '8px 12px', color: '#022FCD', '&:hover': { backgroundColor: 'rgba(0,0,0,0.04)' } }}>
+                          <LinkOutlined sx={{ fontSize: '20px' }} />
+                        </IconButton>
+                      </Tooltip>
+                    </div>
 
                     {/* Description with Show more/less */}
                     <div style={{ width: "100%" }}>
@@ -1210,7 +1304,7 @@ const ctaButtons = (
                             <DataProfile scanName={dpScanName} allScansStatus={allScansStatus} />
                         </CustomTabPanel>
                         <CustomTabPanel value={tabValue} index={5}>
-                            <DataQuality scanName={dqScanName} allScansStatus={allScansStatus} />
+                            <DataQuality scanName={dqScanName} allScansStatus={allScansStatus} aspectScorecard={aspectScorecard} />
                         </CustomTabPanel>
                         <CustomTabPanel value={tabValue} index={6}>
                             <TableInsights entry={entry} scanName={tableInsightsScanName} />
@@ -1235,7 +1329,29 @@ const ctaButtons = (
                             {linkedTermsTab}
                         </CustomTabPanel>
                         <CustomTabPanel value={tabValue} index={4}>
-                            <TableInsights entry={entry} scanName={tableInsightsScanName} />
+                            <DatasetInsights entry={entry} scanName={tableInsightsScanName} />
+                        </CustomTabPanel>
+                      </>
+                    ) : entry.entrySource?.system?.toLowerCase() === 'looker' ? (
+                      <>
+                        <CustomTabPanel value={tabValue} index={1}>
+                            <EntryList entry={displayEntry}/>
+                        </CustomTabPanel>
+                        <CustomTabPanel value={tabValue} index={2}>
+                            <AnnotationFilter
+                              entry={displayEntry}
+                              onFilteredEntryChange={setFilteredEntry}
+                              sx={{}}
+                              onCollapseAll={handleAnnotationCollapseAll}
+                              onExpandAll={handleAnnotationExpandAll}
+                            />
+                            {annotationTab}
+                        </CustomTabPanel>
+                        <CustomTabPanel value={tabValue} index={3}>
+                            {lineageTab}
+                        </CustomTabPanel>
+                        <CustomTabPanel value={tabValue} index={4}>
+                            {linkedTermsTab}
                         </CustomTabPanel>
                       </>
                     ) : glossaryType === 'glossary' || glossaryType === 'category' ? (
