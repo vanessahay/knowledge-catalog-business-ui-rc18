@@ -20,10 +20,10 @@ const SendFeedback: React.FC<SendFeedbackProps> = ({ isOpen, onClose, onSubmitSu
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Destinatário definido por quem implanta o aplicativo (VITE_SUPPORT_EMAIL ou VITE_ADMIN_EMAIL).
   const contactEmails:string[] = [
-    import.meta.env.VITE_SUPPORT_EMAIL || import.meta.env.VITE_ADMIN_EMAIL, 
-    "dataplex-interface-feedback@example.com"
-  ];
+    import.meta.env.VITE_SUPPORT_EMAIL || import.meta.env.VITE_ADMIN_EMAIL
+  ].filter(Boolean);
   const [success, setSuccess] = useState(false);
   const { user } = useAuth();
   const userState = useSelector((state: any) => state.user);

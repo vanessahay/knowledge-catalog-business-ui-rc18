@@ -379,7 +379,7 @@ describe('Routing', () => {
       expect(screen.getByText('For help contact over these email')).toBeInTheDocument();
       expect(screen.getByText('Admin/Support Contact Email')).toBeInTheDocument();
       expect(screen.getByText('Knowledge Catalog Business Interface Support')).toBeInTheDocument();
-      expect(screen.getByText('dataplex-interface-feedback@example.com')).toBeInTheDocument();
+      expect(screen.getByText('github.com/GoogleCloudPlatform/knowledge-catalog-business-user-interface/issues')).toBeInTheDocument();
     });
   });
 

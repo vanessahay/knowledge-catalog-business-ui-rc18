@@ -286,9 +286,7 @@ app.post('/api/v1/check-permissions', async (req, res) => {
 
         const grantedPermissions = response.data.permissions || [];
         const missingPermissions = permissions.filter(p => !grantedPermissions.includes(p));
-        // Under Knowledge Catalog's fine-grained IAM model, users may hold roles/dataplex.catalogViewer
-        // (or permissions on spoke projects configured in configData.json) rather than every legacy permission.
-        const hasPermission = grantedPermissions.length > 0 || isServiceAccountMode();
+        const hasPermission = missingPermissions.length === 0;
 
         console.log(`Granted ${grantedPermissions.length}/${permissions.length} permissions for project ${projectId}.`);
         if (missingPermissions.length > 0) {
@@ -300,7 +298,7 @@ app.post('/api/v1/check-permissions', async (req, res) => {
             grantedPermissions,
             missingPermissions,
             message: hasPermission
-                ? `User has Knowledge Catalog access on project ${projectId}.`
+                ? `User has all required permissions on project ${projectId}.`
                 : `User is missing ${missingPermissions.length} permission(s) on project ${projectId}.`,
         });
 

@@ -265,7 +265,7 @@ const Routing = () => {
                         <div style={{ flex: '1 1 0', width: '50%'  }}>
                           <div style={{ color: "#575757", fontSize: "1.6875rem", fontWeight: "500", fontFamily: '"Google Sans Text",sans-serif' }}>Knowledge Catalog Business Interface Support</div>
                           <div style={{ textDecoration:"underline", color: "#022FCD", fontSize: "1rem", fontWeight: "600", fontFamily: '"Google Sans Text",sans-serif', marginTop: "0.125rem", textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                            dataplex-interface-feedback@example.com
+                            github.com/GoogleCloudPlatform/knowledge-catalog-business-user-interface/issues
                           </div>
                         </div>
                       </div>
