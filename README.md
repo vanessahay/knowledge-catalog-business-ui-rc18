@@ -26,13 +26,13 @@ Nada é preenchido com valores presumidos: o que não foi medido aparece como "s
 | :-- | :-- | :-- | :-- | :-- |
 | I | Acessibilidade | Parcial | % de tabelas do escopo com contatos registrados | Knowledge Catalog — `GetEntry`, aspecto `contacts` |
 | II | Acurácia | Automática | % de regras aprovadas (dimensões `ACCURACY` e `VALIDITY`) | Dataplex DataScans |
-| III | Adaptabilidade | Sem coletor | — | — |
+| III | Adaptabilidade | Regras personalizadas | % de regras aprovadas (`ADAPTABILIDADE`) | Dataplex DataScans |
 | IV | Clareza | Parcial | % de colunas com descrição (mais: tabelas com descrição e com o aspecto `overview`) | BigQuery (metadados); Knowledge Catalog |
-| V | Comparabilidade | Sem coletor | — | — |
+| V | Comparabilidade | Parcial | % de tabelas do escopo com termo de glossário vinculado; % de regras aprovadas (`COMPARABILIDADE`), quando existirem | Knowledge Catalog — `lookupEntryLinks`; Dataplex DataScans |
 | VI | Completude | Automática | % de regras aprovadas (`COMPLETENESS` e `VOLUME`) | Dataplex DataScans |
-| VII | Confiabilidade | Sem coletor | — | — |
+| VII | Confiabilidade | Regras personalizadas | % de regras aprovadas (`CONFIABILIDADE`) | Dataplex DataScans |
 | VIII | Consistência | Automática | % de regras aprovadas (`CONSISTENCY` e `UNIQUENESS`) | Dataplex DataScans |
-| IX | Integridade | Sem coletor | — | — |
+| IX | Integridade | Regras personalizadas | % de regras aprovadas (`INTEGRIDADE`) | Dataplex DataScans |
 | X | Rastreabilidade | Parcial | % de tabelas do escopo com origem registrada | Data Lineage API — `SearchLinks` |
 | XI | Relevância | Parcial | % de tabelas do escopo com consultas nos últimos 30 dias | Knowledge Catalog — aspecto `usage` |
 | XII | Tempestividade | Parcial | % de regras aprovadas (`FRESHNESS` ou `TIMELINESS`), quando existirem; data da última modificação apenas como informação | Dataplex DataScans; BigQuery |
@@ -41,12 +41,17 @@ Nada é preenchido com valores presumidos: o que não foi medido aparece como "s
   mesmo critério do score do Dataplex. Regras configuradas e ainda não executadas ficam fora do cálculo e são
   contadas à parte.
 - **Parcial**: o indicador cobre só parte da definição da dimensão; o cartão informa o limite de cada um.
-- **Sem coletor**: a dimensão aparece como "não medido automaticamente". Ela passa a ter indicador quando houver
-  regras de DataScan marcadas com a dimensão personalizada correspondente (veja abaixo).
+- **Regras personalizadas**: a dimensão não tem fonte automática. O indicador vem das regras de DataScan que a
+  instituição marca com a dimensão personalizada correspondente; sem essas regras, a dimensão aparece como "não
+  medido automaticamente". O [kit RC 18](rc18-kit/README.md) traz regras de exemplo para cada uma.
 
-O painel tem cinco visões: **12 dimensões**, **Qualidade por tabela** (regras e resultado por DataScan),
-**Dados sensíveis** (complementar — não é uma das 12 dimensões), **Rastreabilidade** e **Knowledge Catalog**
-(aspectos das entradas e a resposta do método `lookupContext`).
+Cada cartão de dimensão indica com que recursos do Google Cloud a evidência é produzida ("Como medir no Google
+Cloud") e, quando há regras, leva à lista delas.
+
+O painel tem cinco visões: **12 dimensões**, **Qualidade por tabela** (todas as regras dos DataScans, agrupadas
+pela dimensão da Resolução, com nome, descrição e resultado de cada uma), **Dados sensíveis** (complementar — não
+é uma das 12 dimensões), **Rastreabilidade** e **Knowledge Catalog** (aspectos das entradas, termos de glossário
+vinculados e a resposta do método `lookupContext`).
 
 ### Escopo
 
@@ -55,6 +60,16 @@ O escopo são as **tabelas do BigQuery com DataScan de qualidade de dados** no p
 Banco Central do Brasil; cabe à instituição garantir que as tabelas que alimentam essas informações tenham DataScans.
 
 ### Como preparar o ambiente para o painel ter o que mostrar
+
+A pasta [`rc18-kit/`](rc18-kit/README.md) cria uma demonstração completa com dados sintéticos — tabela de exemplo,
+snapshot da versão informada, tabelas de controle, 19 regras marcadas com as dimensões, contatos, glossário e
+linhagem — e serve de modelo para as tabelas reais:
+
+```bash
+PROJECT_ID=meu-projeto ./rc18-kit/criar-demo.sh
+```
+
+Para as tabelas da instituição:
 
 1. **Regras de qualidade** — crie DataScans de qualidade de dados (Dataplex) para as tabelas do escopo.
 2. **Dimensões personalizadas** — o Dataplex aceita nomes de dimensão personalizados (maiúsculas, até 30
@@ -74,11 +89,14 @@ Banco Central do Brasil; cabe à instituição garantir que as tabelas que alime
    ```
 
    Regras com dimensões que o painel não reconhece são listadas como "sem correspondência" e ficam fora dos
-   indicadores.
+   indicadores. As regras podem consultar outras tabelas — por exemplo, um snapshot com a versão informada
+   (confiabilidade), uma tabela de revisões autorizadas (integridade), tabelas de domínio (comparabilidade) ou
+   o registro dos testes de geração fora da rotina (adaptabilidade). Os exemplos estão em
+   [`rc18-kit/regras/rc18-regras-demo.yaml`](rc18-kit/regras/rc18-regras-demo.yaml).
 3. **Descrições** — preencha a descrição das tabelas e das colunas no BigQuery (dicionário de dados — art. 3º,
    III, "c").
 4. **Contexto de negócio no Knowledge Catalog** — registre nas entradas das tabelas os aspectos `contacts`
-   (responsáveis) e `overview` (documentação).
+   (responsáveis) e `overview` (documentação) e vincule as colunas aos termos do glossário de negócios.
 5. **Linhagem** — habilite a Data Lineage API no projeto: os serviços integrados (por exemplo, os jobs do
    BigQuery) passam a registrar os elos das execuções seguintes.
 
@@ -118,7 +136,7 @@ usuário precisa de acesso equivalente):
 | Papel | Uso |
 | :-- | :-- |
 | `roles/browser` | Leitura do projeto |
-| `roles/dataplex.catalogViewer` | Entradas, aspectos e `lookupContext` do Knowledge Catalog |
+| `roles/dataplex.catalogViewer` | Entradas, aspectos, vínculos com termos de glossário (`lookupEntryLinks`) e `lookupContext` do Knowledge Catalog |
 | `roles/dataplex.viewer` | Recursos do Dataplex (produtos de dados) |
 | `roles/dataplex.dataScanDataViewer` | Regras e resultados dos DataScans |
 | `roles/bigquery.metadataViewer` | Metadados de tabelas (descrições, Policy Tags) |
@@ -268,7 +286,7 @@ Todas exigem `Authorization: Bearer <token Google>` e aceitam `location` (uma re
 | Rota | Conteúdo |
 | :-- | :-- |
 | `GET /api/v1/rc18/dimensions` | As 12 dimensões: definição literal, estado, indicadores, evidências e limites |
-| `GET /api/v1/rc18/data-quality-dimensions` | Regras e resultados por tabela; entradas do Knowledge Catalog; `lookupContext` |
+| `GET /api/v1/rc18/data-quality-dimensions` | Regras e resultados por tabela, agrupados pela dimensão da Resolução; entradas do Knowledge Catalog (aspectos e termos de glossário); `lookupContext` |
 | `GET /api/v1/rc18/lineage-traceability` | Origens, processos e destinos registrados na Data Lineage API |
 | `GET /api/v1/rc18/dlp-sensitive-data` | Policy Tags e colunas candidatas pelo nome (visão complementar) |
 
@@ -296,8 +314,13 @@ O teste do backend gera as respostas que o teste do frontend renderiza
 - Até 50 DataScans de qualidade por consulta (cada um aponta para uma tabela); o painel avisa quando a lista é
   truncada.
 - `lookupContext`: até 10 entradas por localização.
+- Termos de glossário: primeira página de vínculos por tabela (até 10); acima disso o painel mostra "10 ou mais".
 - Linhagem: primeira página de elos por tabela e até 3 processos por tabela.
-- Adaptabilidade, comparabilidade, confiabilidade e integridade não têm coletor nesta versão.
+- Adaptabilidade, confiabilidade e integridade não têm fonte automática: só aparecem com indicador quando há
+  regras marcadas com a dimensão personalizada. O painel lê o resultado dessas regras; ele não executa os testes
+  nem confere se os registros de controle que elas consultam estão completos.
+- O indicador de regras junta a última execução de cada DataScan; o cartão mostra a data mais recente e a mais
+  antiga entre elas.
 - O instalador não remove papéis: se uma instalação no modo conta de serviço for refeita no modo OAuth do
   usuário, os papéis já concedidos à conta de serviço do runtime permanecem e devem ser removidos manualmente.
 - A visão de dados sensíveis usa Policy Tags (fato) e o nome das colunas (heurística); não inspeciona conteúdo. A
@@ -317,9 +340,13 @@ O teste do backend gera as respostas que o teste do frontend renderiza
     Protection funcionaram; a leitura de dados (amostra de tabela) foi recusada, como esperado;
   - restrições: token emitido para outro OAuth Client → 401; e-mail de domínio fora de `ALLOWED_EMAIL_DOMAINS`
     → 403.
-- Dimensões personalizadas: a API do Dataplex aceitou regras com `INTEGRIDADE` e `CONFIABILIDADE` na validação da
-  especificação (`CreateDataScan` com `validateOnly=true`) e recusou nomes em minúsculas ou com mais de 30
-  caracteres. A leitura do resultado de um DataScan real com dimensão personalizada ainda não foi validada.
+- Dimensões personalizadas: validado com um DataScan real de 19 regras (o do [kit RC 18](rc18-kit/README.md)),
+  com as dimensões `ADAPTABILIDADE`, `COMPARABILIDADE`, `CONFIABILIDADE` e `INTEGRIDADE` e regras que consultam
+  outras tabelas. O painel leu os mesmos resultados devolvidos pelo Dataplex. A API recusa nomes de dimensão em
+  minúsculas ou com mais de 30 caracteres.
+- Termos de glossário (`lookupEntryLinks`): validado no modo OAuth do usuário, com vínculos de coluna criados pela
+  API. No modo conta de serviço não foi executado; o papel `roles/dataplex.catalogViewer`, que o instalador
+  concede, contém as permissões `dataplex.entries.get`, `dataplex.entryLinks.get` e `dataplex.glossaryTerms.get`.
 - **Ainda não validado**: o login pelo navegador em um serviço criado pelo instalador (isto é, com
   `GOOGLE_OAUTH_CLIENT_ID` definido) e a interface no modo conta de serviço — os testes do instalador foram
   feitos por API; o modo OAuth com um usuário de privilégio mínimo (os testes usaram um administrador do
