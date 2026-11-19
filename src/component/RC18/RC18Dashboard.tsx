@@ -24,7 +24,9 @@ import {
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
+import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import DownloadIcon from '@mui/icons-material/Download';
 import StorageIcon from '@mui/icons-material/Storage';
 import TableChartIcon from '@mui/icons-material/TableChart';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
@@ -39,17 +41,20 @@ import FactCheckIcon from '@mui/icons-material/FactCheck';
 import axios from 'axios';
 import { useAuth } from '../../auth/AuthProvider';
 import { URLS } from '../../constants/urls';
+import RC18DimensionsOverview from './RC18DimensionsOverview';
+import { type Rc18DimensionsReport, type Rc18Diagnostic, formatCount, formatPct } from './rc18Types';
 
 interface RuleDetail {
   ruleName: string;
   column: string;
   table: string;
   dataset?: string;
-  passed: boolean;
-  evaluatedCount: number;
-  passedCount: number;
-  failedCount: number;
-  passPercentage: number;
+  executed?: boolean;
+  passed: boolean | null;
+  evaluatedCount: number | null;
+  passedCount: number | null;
+  failedCount: number | null;
+  passPercentage: number | null;
   dimension: string;
   description?: string;
   executionTime?: string;
@@ -58,7 +63,7 @@ interface RuleDetail {
 interface DimensionData {
   name: string;
   group: string;
-  scorePct: number;
+  scorePct: number | null;
   rulesEvaluated: number;
   rulesPassed: number;
   rules: RuleDetail[];
@@ -73,12 +78,13 @@ interface TableSummary {
   totalRules: number;
   passedRules: number;
   failedRules: number;
-  accuracyScore: number;
-  completenessScore: number;
-  consistencyScore: number;
-  overallScore: number;
+  notExecutedRules?: number;
+  accuracyScore: number | null;
+  completenessScore: number | null;
+  consistencyScore: number | null;
+  overallScore: number | null;
   lastExecutionTime?: string;
-  status: 'Conforme' | 'Atenção' | 'Crítico';
+  status: 'Sem falhas' | 'Com falhas' | 'Sem execução';
 }
 
 interface CatalogContextItem {
@@ -89,9 +95,16 @@ interface CatalogContextItem {
   entryLocation?: string;
   aspectTypes: string[];
   hasScorecardAspect?: boolean;
+  scorecardScore?: number | null;
+  contactsCount?: number | null;
+  hasOverview?: boolean | null;
+  queries30d?: number | null;
+  refreshCadence?: string | null;
+  found?: boolean;
+  error?: string | null;
   governanceDomain: string;
-  dataQualityScore: number;
-  complianceStatus: 'Conforme' | 'Atenção' | 'Crítico';
+  dataQualityScore: number | null;
+  complianceStatus: 'Sem falhas' | 'Com falhas' | 'Sem execução';
   lastLookupTime: string;
 }
 
@@ -104,7 +117,7 @@ interface DlpFinding {
   infoTypeDisplayName: string;
   category: string;
   likelihood: string;
-  estimatedOccurrences: number;
+  estimatedOccurrences: number | null;
   sensitivity: 'Alta' | 'Média' | 'Baixa';
   policyTagApplied: boolean;
   policyTagName?: string;
@@ -120,8 +133,8 @@ interface DlpTableRiskProfile {
   detectedInfoTypes: string[];
   categories: string[];
   maskingCoveragePct: number;
+  taggedColumns?: number;
   complianceStatus: string;
-  riskLevel: 'Alto' | 'Médio' | 'Baixo';
 }
 
 interface DlpSummary {
@@ -131,7 +144,7 @@ interface DlpSummary {
   bankingSecrecyFields: number;
   highSensitivityFieldsCount: number;
   protectedWithPolicyTagsCount: number;
-  overallProtectionCoveragePct: number;
+  overallProtectionCoveragePct: number | null;
   highRiskTablesCount: number;
   complianceLevel: string;
 }
@@ -146,6 +159,9 @@ interface InfoTypeDistributionItem {
 interface DlpResponse {
   success: boolean;
   isDemoFallback?: boolean;
+  demo?: boolean;
+  identityMode?: string;
+  diagnostics?: Rc18Diagnostic[];
   projectId?: string;
   timestamp: string;
   location: string;
@@ -153,6 +169,15 @@ interface DlpResponse {
   infoTypeDistribution: InfoTypeDistributionItem[];
   findings: DlpFinding[];
   tableRiskProfiles: DlpTableRiskProfile[];
+  metodo?: string;
+  aviso?: string;
+  perfisSensitiveDataProtection?: {
+    consultado: boolean;
+    local: string | null;
+    quantidade: number | null;
+    haMais: boolean;
+    erro: string | null;
+  };
 }
 
 interface LineageNode {
@@ -161,17 +186,18 @@ interface LineageNode {
   type: 'source' | 'process' | 'table' | 'target';
   layer?: string;
   system?: string;
-  engine?: string;
-  schedule?: string;
-  script?: string;
+  engine?: string | null;
+  schedule?: string | null;
+  script?: string | null;
   dataset?: string;
   table?: string;
-  rows?: string;
+  rows?: string | null;
   sensitivity?: string;
-  qualityScore?: number;
+  qualityScore?: number | null;
   regulatoryEntity?: string;
-  deadline?: string;
-  frequency?: string;
+  deadline?: string | null;
+  frequency?: string | null;
+  processId?: string | null;
 }
 
 interface LineageEdge {
@@ -185,11 +211,11 @@ interface PipelineDetail {
   sourceSystem: string;
   ingestionType: string;
   transformationEngine: string;
-  pipelineName: string;
-  lastRunTime: string;
+  pipelineName: string | null;
+  lastRunTime: string | null;
   regulatoryTargets: string[];
   traceabilityStatus: string;
-  hasBrokenLinks: boolean;
+  hasUpstream: boolean;
   columnLineageCount: number;
   complianceNote: string;
 }
@@ -198,7 +224,7 @@ interface LineageSummary {
   totalTablesAudited: number;
   fullyTraceableTablesCount: number;
   partialTraceableTablesCount: number;
-  traceabilityCoveragePct: number;
+  traceabilityCoveragePct: number | null;
   totalTransformationPipelines: number;
   regulatoryReportsMapped: number;
   activeSourcesCount: number;
@@ -208,6 +234,9 @@ interface LineageSummary {
 interface LineageResponse {
   success: boolean;
   isDemoFallback?: boolean;
+  demo?: boolean;
+  identityMode?: string;
+  diagnostics?: Rc18Diagnostic[];
   projectId?: string;
   timestamp: string;
   location: string;
@@ -220,6 +249,9 @@ interface LineageResponse {
 interface RC18Response {
   success: boolean;
   isDemoFallback?: boolean;
+  demo?: boolean;
+  identityMode?: string;
+  diagnostics?: Rc18Diagnostic[];
   projectId?: string;
   location?: string;
   timestamp: string;
@@ -240,7 +272,7 @@ interface RC18Response {
 }
 
 const AVAILABLE_REGIONS = [
-  { value: 'global', label: 'global (Multi-Região Automática - Recomendado)' },
+  { value: 'global', label: 'Todas as localizações' },
   { value: 'southamerica-east1', label: 'southamerica-east1 (América do Sul - São Paulo)' },
   { value: 'us-central1', label: 'us-central1 (EUA Central - Iowa)' },
   { value: 'us-east1', label: 'us-east1 (EUA Leste - Carolina do Sul)' },
@@ -250,6 +282,15 @@ const AVAILABLE_REGIONS = [
   { value: 'asia-east1', label: 'asia-east1 (Ásia Leste - Taiwan)' }
 ];
 
+/** Mensagem devolvida pela API (ou pelo cliente HTTP), quando houver. */
+const messageFromError = (err: unknown): string | undefined => {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const e = err as { response?: { data?: { message?: unknown } }; message?: unknown };
+  const apiMessage = e.response?.data?.message;
+  if (typeof apiMessage === 'string' && apiMessage) return apiMessage;
+  return typeof e.message === 'string' && e.message ? e.message : undefined;
+};
+
 const RC18Dashboard: React.FC = () => {
   const { user } = useAuth();
   const [loading, setLoading] = useState<boolean>(true);
@@ -257,32 +298,46 @@ const RC18Dashboard: React.FC = () => {
   const [data, setData] = useState<RC18Response | null>(null);
   const [dlpData, setDlpData] = useState<DlpResponse | null>(null);
   const [lineageData, setLineageData] = useState<LineageResponse | null>(null);
+  const [dimsData, setDimsData] = useState<Rc18DimensionsReport | null>(null);
+  // Dados sintéticos só aparecem quando o usuário pede explicitamente.
+  const [demoMode, setDemoMode] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<number>(0);
   const [dlpTab, setDlpTab] = useState<number>(0);
   const [lineageTab, setLineageTab] = useState<number>(0);
-  const [viewMode, setViewMode] = useState<'by_table' | 'dlp_privacy' | 'lineage_traceability' | 'centralized'>('by_table');
+  const [viewMode, setViewMode] = useState<'dimensions' | 'by_table' | 'dlp_privacy' | 'lineage_traceability' | 'centralized'>('dimensions');
   const [selectedLineageTable, setSelectedLineageTable] = useState<string | null>(null);
 
   // Knowledge Catalog & Cloud DLP Selection State (defaults to multi-region discovery)
   const [selectedLocation, setSelectedLocation] = useState<string>('global');
 
-  // Fetch Quality Dimensions, Cloud DLP Sensitive Data & Lineage in parallel using configured API_URL
-  const fetchFrameworkData = async (location: string = selectedLocation) => {
+  // Carrega as visões em paralelo; `rid` agrupa as chamadas de um mesmo carregamento no backend.
+  const fetchFrameworkData = async (location: string = selectedLocation, demo: boolean = demoMode) => {
     setLoading(true);
     setError(null);
+    setDimsData(null);
+    setData(null);
+    setDlpData(null);
+    setLineageData(null);
     try {
       const headers = user?.token ? { Authorization: `Bearer ${user.token}` } : {};
-      const [dqRes, dlpRes, linRes] = await Promise.all([
-        axios.get(`${URLS.API_URL}/rc18/data-quality-dimensions`, { params: { location }, headers }),
-        axios.get(`${URLS.API_URL}/rc18/dlp-sensitive-data`, { params: { location }, headers }),
-        axios.get(`${URLS.API_URL}/rc18/lineage-traceability`, { params: { location }, headers })
+      const params = {
+        location,
+        demo: demo ? 'true' : undefined,
+        rid: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      };
+      const [dimRes, dqRes, dlpRes, linRes] = await Promise.all([
+        axios.get(`${URLS.API_URL}/rc18/dimensions`, { params, headers }),
+        axios.get(`${URLS.API_URL}/rc18/data-quality-dimensions`, { params, headers }),
+        axios.get(`${URLS.API_URL}/rc18/dlp-sensitive-data`, { params, headers }),
+        axios.get(`${URLS.API_URL}/rc18/lineage-traceability`, { params, headers })
       ]);
+      setDimsData(dimRes.data);
       setData(dqRes.data);
       setDlpData(dlpRes.data);
       setLineageData(linRes.data);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Failed to fetch RC18 framework data:', err);
-      setError(err.response?.data?.message || err.message || 'Erro ao carregar dados do Framework BACEN 18.');
+      setError(messageFromError(err) ?? 'Erro ao carregar os dados do painel RC 18.');
     } finally {
       setLoading(false);
     }
@@ -296,120 +351,113 @@ const RC18Dashboard: React.FC = () => {
     fetchFrameworkData(selectedLocation);
   };
 
+  const toggleDemo = () => {
+    const next = !demoMode;
+    setDemoMode(next);
+    fetchFrameworkData(selectedLocation, next);
+  };
+
   const accuracy = data?.dimensions?.accuracy;
   const completeness = data?.dimensions?.completeness;
   const consistency = data?.dimensions?.consistency;
 
-  const getDerivedTableSummaries = (): TableSummary[] => {
-    if (data?.tableSummaries && data.tableSummaries.length > 0) {
-      return data.tableSummaries;
-    }
-    const map: Record<string, {
-      dataset: string;
-      table: string;
-      fullTableName: string;
-      accuracyRules: RuleDetail[];
-      completenessRules: RuleDetail[];
-      consistencyRules: RuleDetail[];
-      totalRules: number;
-      passedRules: number;
-      failedRules: number;
-      lastExecutionTime?: string;
-    }> = {};
+  const tableSummariesList: TableSummary[] = data?.tableSummaries ?? [];
+  const centralizedContextList: CatalogContextItem[] = data?.centralizedCatalogContext ?? [];
 
-    const all = [
-      ...(accuracy?.rules || []),
-      ...(completeness?.rules || []),
-      ...(consistency?.rules || [])
-    ];
+  const isDemo = !!(dimsData?.demo ?? data?.demo);
+  const identityMode = dimsData?.identityMode ?? data?.identityMode;
+  const identityLabel =
+    identityMode === 'service_account'
+      ? 'Consultado com a conta de serviço do aplicativo'
+      : identityMode === 'adc_dev'
+      ? 'Consultado com as credenciais locais (desenvolvimento)'
+      : 'Consultado com as permissões do usuário conectado';
+  const allDiagnostics: Rc18Diagnostic[] = Array.from(
+    new Map(
+      [
+        ...(dimsData?.diagnostics ?? []),
+        ...(data?.diagnostics ?? []),
+        ...(dlpData?.diagnostics ?? []),
+        ...(lineageData?.diagnostics ?? [])
+      ].map((d) => [`${d.fonte}|${d.local}|${d.mensagem}`, d] as const)
+    ).values()
+  );
 
-    for (const r of all) {
-      const ds = r.dataset || (r.table.includes('cartao') ? 'transacoes_cartao' : (r.table.includes('cliente') ? 'cadastro_cliente' : 'financeiro'));
-      const key = `${ds}.${r.table}`;
-      if (!map[key]) {
-        map[key] = {
-          dataset: ds,
-          table: r.table,
-          fullTableName: key,
-          accuracyRules: [],
-          completenessRules: [],
-          consistencyRules: [],
-          totalRules: 0,
-          passedRules: 0,
-          failedRules: 0,
-          lastExecutionTime: r.executionTime
-        };
-      }
-      map[key].totalRules += 1;
-      if (r.passed) map[key].passedRules += 1;
-      else map[key].failedRules += 1;
-
-      if (r.dimension === 'COMPLETENESS' || r.ruleName.includes('NULL')) {
-        map[key].completenessRules.push(r);
-      } else if (r.dimension === 'UNIQUENESS' || r.dimension === 'CONSISTENCY' || r.ruleName.includes('Unicidade')) {
-        map[key].consistencyRules.push(r);
-      } else {
-        map[key].accuracyRules.push(r);
-      }
-    }
-
-    return Object.values(map).map(ts => {
-      const calcPct = (rules: RuleDetail[]) => {
-        if (rules.length === 0) return 100.0;
-        const total = rules.reduce((acc, curr) => acc + (curr.evaluatedCount || 1), 0);
-        const passed = rules.reduce((acc, curr) => acc + (curr.passedCount || (curr.passed ? 1 : 0)), 0);
-        return Math.round((passed / Math.max(total, 1)) * 10000) / 100;
-      };
-
-      const accScore = calcPct(ts.accuracyRules);
-      const compScore = calcPct(ts.completenessRules);
-      const consScore = calcPct(ts.consistencyRules);
-      const overallScore = calcPct([...ts.accuracyRules, ...ts.completenessRules, ...ts.consistencyRules]);
-
-      let status: 'Conforme' | 'Atenção' | 'Crítico' = 'Conforme';
-      if (ts.failedRules > 0 && overallScore >= 90) status = 'Atenção';
-      else if (overallScore < 90) status = 'Crítico';
-
-      return {
-        dataset: ts.dataset,
-        table: ts.table,
-        fullTableName: ts.fullTableName,
-        totalRules: ts.totalRules,
-        passedRules: ts.passedRules,
-        failedRules: ts.failedRules,
-        accuracyScore: accScore,
-        completenessScore: compScore,
-        consistencyScore: consScore,
-        overallScore: overallScore,
-        lastExecutionTime: ts.lastExecutionTime,
-        status
-      };
-    });
+  // Baixa as evidências exibidas, para apoiar o relatório semestral (art. 3º, V, "b").
+  // A resposta do lookupContext fica de fora: ela pode trazer valores de exemplo dos dados.
+  const downloadEvidence = () => {
+    if (!dimsData) return;
+    const geradoEm = new Date().toISOString();
+    const payload = {
+      geradoEm,
+      aviso: dimsData.norma?.aviso ?? null,
+      dimensoes: dimsData,
+      qualidadePorTabela: data ? { ...data, lookupContextYaml: undefined } : null,
+      rastreabilidade: lineageData,
+      dadosSensiveis: dlpData
+    };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `rc18-evidencias-${isDemo ? 'exemplo' : dimsData.projectId}-${geradoEm.slice(0, 10)}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   };
 
-  const tableSummariesList = getDerivedTableSummaries();
+  const scoreColor = (v: number | null | undefined) =>
+    v === null || v === undefined ? '#5F6368' : v === 100 ? '#137333' : '#B06000';
 
-  const getDerivedCentralizedContext = (): CatalogContextItem[] => {
-    if (data?.centralizedCatalogContext && data.centralizedCatalogContext.length > 0) {
-      return data.centralizedCatalogContext;
-    }
-    return tableSummariesList.map(ts => ({
-      entryId: `${ts.dataset}_${ts.table}`,
-      displayName: ts.fullTableName,
-      linkedResource: `//bigquery.googleapis.com/projects/your-project/datasets/${ts.dataset}/tables/${ts.table}`,
-      entryGroup: '@bigquery',
-      aspectTypes: ['schema', 'data_quality_aspect', 'governance_classification'],
-      governanceDomain: ts.dataset.toUpperCase(),
-      dataQualityScore: ts.overallScore,
-      complianceStatus: ts.status,
-      lastLookupTime: new Date().toISOString()
-    }));
+  // Selo dos cartões: neutro quando não há execução (nunca presume aprovação nem falha).
+  const renderScoreBadge = (v: number | null | undefined) => {
+    const none = v === null || v === undefined;
+    return (
+      <Box
+        sx={{
+          width: '56px',
+          height: '56px',
+          borderRadius: '50%',
+          backgroundColor: none ? '#F1F3F4' : v === 100 ? '#E6F4EA' : '#FEF7E0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}
+      >
+        {none ? (
+          <RemoveCircleOutlineIcon sx={{ color: '#5F6368', fontSize: 32 }} />
+        ) : v === 100 ? (
+          <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
+        ) : (
+          <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
+        )}
+      </Box>
+    );
   };
 
-  const centralizedContextList = getDerivedCentralizedContext();
+  const renderRuleStatus = (rule: RuleDetail) => {
+    if (rule.executed === false || rule.passed === null) {
+      return <Chip label="Sem execução" size="small" variant="outlined" />;
+    }
+    return rule.passed ? (
+      <Chip icon={<CheckCircleIcon />} label="Aprovada" color="success" size="small" />
+    ) : (
+      <Chip icon={<WarningIcon />} label="Reprovada" color="error" size="small" />
+    );
+  };
 
   return (
-    <Box sx={{ width: '92%', maxWidth: '1400px', margin: '24px auto', paddingBottom: '40px' }}>
+    <Box
+      sx={{
+        width: '92%',
+        maxWidth: '1400px',
+        margin: '24px auto',
+        paddingBottom: '40px',
+        // Nomes longos de dataset/tabela quebram linha em vez de empurrar colunas para fora da tela.
+        '& .MuiTableCell-root': { padding: '12px 10px' },
+        '& td:first-of-type': { overflowWrap: 'anywhere', minWidth: '190px' }
+      }}
+    >
       {/* Header Banner */}
       <Box
         sx={{
@@ -426,28 +474,48 @@ const RC18Dashboard: React.FC = () => {
       >
         <Box>
           <Typography variant="h4" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif', fontSize: '28px' }}>
-            Painel - Qualidade de Dados (Resolução BCB nº 18/2025)
+            Painel — Qualidade das Informações (Resolução Conjunta nº 18/2025)
           </Typography>
           <Typography variant="subtitle1" sx={{ opacity: 0.9, marginTop: '6px', fontSize: '15px' }}>
-            Consulta de Qualidade via Knowledge Catalog Lookup & Dataplex DataScans
+            Evidências técnicas das 12 dimensões do art. 2º, § 2º — Dataplex, Knowledge Catalog, Data Lineage e BigQuery
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<RefreshIcon />}
-          onClick={() => fetchFrameworkData(selectedLocation)}
-          disabled={loading}
-          sx={{
-            backgroundColor: '#FFF',
-            color: '#022FCD',
-            fontWeight: 600,
-            textTransform: 'none',
-            borderRadius: '8px',
-            '&:hover': { backgroundColor: '#E8F0FE' }
-          }}
-        >
-          Atualizar Scans
-        </Button>
+        <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ flexShrink: 0, marginLeft: '16px' }}>
+          <Button
+            variant="outlined"
+            startIcon={<DownloadIcon />}
+            onClick={downloadEvidence}
+            disabled={loading || !!error || !dimsData}
+            sx={{
+              color: '#FFF',
+              borderColor: 'rgba(255,255,255,0.7)',
+              fontWeight: 600,
+              textTransform: 'none',
+              borderRadius: '8px',
+              whiteSpace: 'nowrap',
+              '&:hover': { borderColor: '#FFF', backgroundColor: 'rgba(255,255,255,0.12)' },
+              '&.Mui-disabled': { color: 'rgba(255,255,255,0.5)', borderColor: 'rgba(255,255,255,0.3)' }
+            }}
+          >
+            Baixar evidências (JSON)
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<RefreshIcon />}
+            onClick={() => fetchFrameworkData(selectedLocation)}
+            disabled={loading}
+            sx={{
+              backgroundColor: '#FFF',
+              color: '#022FCD',
+              fontWeight: 600,
+              textTransform: 'none',
+              borderRadius: '8px',
+              '&:hover': { backgroundColor: '#E8F0FE' }
+            }}
+          >
+            Atualizar
+          </Button>
+        </Stack>
       </Box>
 
       {/* Selector Panel: Região como filtro de escolha */}
@@ -462,10 +530,10 @@ const RC18Dashboard: React.FC = () => {
         }}
       >
         <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '16px', color: '#1F1F1F', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <StorageIcon sx={{ color: '#1A73E8' }} /> Filtro de Região do Google Cloud / Dataplex
+          <StorageIcon sx={{ color: '#1A73E8' }} /> Localização do Google Cloud
         </Typography>
         <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px', fontSize: '13px' }}>
-          Selecione a região do GCP para carregar o contexto de catálogo centralizado e as métricas de qualidade de dados.
+          Escolha uma localização ou todas. O escopo do painel são as tabelas com DataScan de qualidade de dados na localização escolhida.
         </Typography>
 
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems="center">
@@ -501,12 +569,20 @@ const RC18Dashboard: React.FC = () => {
               '&:hover': { backgroundColor: '#1557B0' }
             }}
           >
-            Consultar Qualidade
+            Consultar
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={toggleDemo}
+            disabled={loading}
+            sx={{ minWidth: '220px', height: '40px', fontWeight: 600, textTransform: 'none', borderRadius: '8px' }}
+          >
+            {demoMode ? 'Voltar aos dados do projeto' : 'Ver exemplo sintético'}
           </Button>
         </Stack>
       </Paper>
 
-      {/* Selector de 4 Visões do Framework BACEN 18 (Onda 1 & Onda 2) */}
+      {/* Seletor de visões do painel RC 18 */}
       <Paper
         sx={{
           padding: '12px 16px',
@@ -517,6 +593,24 @@ const RC18Dashboard: React.FC = () => {
         }}
       >
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5}>
+          <Button
+            fullWidth
+            variant={viewMode === 'dimensions' ? 'contained' : 'outlined'}
+            startIcon={<FactCheckIcon />}
+            onClick={() => setViewMode('dimensions')}
+            sx={{
+              py: 1.3,
+              borderRadius: '10px',
+              fontWeight: 700,
+              textTransform: 'none',
+              fontSize: '13.5px',
+              backgroundColor: viewMode === 'dimensions' ? '#022FCD' : 'transparent',
+              color: viewMode === 'dimensions' ? '#FFF' : '#5F6368',
+              borderColor: '#DADCE0'
+            }}
+          >
+            12 dimensões (art. 2º, § 2º)
+          </Button>
           <Button
             fullWidth
             variant={viewMode === 'by_table' ? 'contained' : 'outlined'}
@@ -533,7 +627,7 @@ const RC18Dashboard: React.FC = () => {
               borderColor: '#DADCE0'
             }}
           >
-            1. 📊 Qualidade (Dataplex)
+            Qualidade por tabela
           </Button>
           <Button
             fullWidth
@@ -551,7 +645,7 @@ const RC18Dashboard: React.FC = () => {
               borderColor: '#DADCE0'
             }}
           >
-            2. 🛡️ Sigilo & DLP
+            Dados sensíveis (complementar)
           </Button>
           <Button
             fullWidth
@@ -569,7 +663,7 @@ const RC18Dashboard: React.FC = () => {
               borderColor: '#DADCE0'
             }}
           >
-            3. 🔄 Linhagem (Art. 8º)
+            Rastreabilidade (inciso X)
           </Button>
           <Button
             fullWidth
@@ -587,7 +681,7 @@ const RC18Dashboard: React.FC = () => {
               borderColor: '#DADCE0'
             }}
           >
-            4. 🌐 Governança Central
+            Knowledge Catalog (contexto)
           </Button>
         </Stack>
       </Paper>
@@ -602,70 +696,71 @@ const RC18Dashboard: React.FC = () => {
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px' }}>
           <CircularProgress size={48} sx={{ color: '#1A73E8' }} />
         </Box>
-      ) : (
+      ) : error ? null : (
         <>
-          {/* Active Selection Badge */}
+          {/* Origem dos dados e diagnósticos */}
           <Box sx={{ marginBottom: '20px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-            <Typography variant="body2" sx={{ color: '#5F6368', fontWeight: 500 }}>
-              Escopo Ativo:
-            </Typography>
-            <Chip
-              icon={<StorageIcon style={{ fontSize: 16 }} />}
-              label={data?.projectId ? `${data.projectId} (${selectedLocation})` : selectedLocation}
-              size="small"
-              sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8', fontWeight: 600 }}
-            />
-            <Chip
-              label={
-                viewMode === 'by_table'
-                  ? 'Modo: 1. Qualidade de Dados (Resolução BACEN 18/2025)'
-                  : viewMode === 'dlp_privacy'
-                  ? 'Modo: 2. Classificação de Dados & Sigilo Bancário (Cloud DLP)'
-                  : viewMode === 'lineage_traceability'
-                  ? 'Modo: 3. Rastreabilidade & Linhagem de Dados (Art. 8º BACEN 18)'
-                  : 'Modo: 4. Visão Centralizada de Governança (Knowledge Catalog)'
-              }
-              size="small"
-              sx={{ backgroundColor: '#F3E8FF', color: '#7E22CE', fontWeight: 600 }}
-            />
-            {(viewMode === 'by_table' || viewMode === 'centralized') && data?.isDemoFallback === false && (
+            {/* No modo de exemplo o projeto não é exibido: os dados não vêm dele. */}
+            {!isDemo && (
               <Chip
-                icon={<CheckCircleIcon style={{ fontSize: 16 }} />}
-                label="Dados Reais da API Knowledge Catalog / Dataplex"
-                color="success"
+                icon={<StorageIcon style={{ fontSize: 16 }} />}
+                label={`${dimsData?.projectId ?? data?.projectId ?? '—'} • ${(dimsData?.location ?? data?.location ?? 'global') === 'global' ? 'todas as localizações' : dimsData?.location ?? data?.location}`}
                 size="small"
-                sx={{ fontWeight: 600 }}
+                sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8', fontWeight: 600 }}
               />
             )}
-            {((viewMode === 'by_table' && data?.isDemoFallback) ||
-              (viewMode === 'dlp_privacy' && dlpData?.isDemoFallback) ||
-              (viewMode === 'lineage_traceability' && lineageData?.isDemoFallback)) && (
+            {isDemo ? (
               <Chip
-                icon={<GppGoodIcon style={{ fontSize: 16 }} />}
-                label="Modo Referência Sintética (Crie ativos/scans no projeto para dados ao vivo)"
-                color="info"
-                variant="outlined"
+                label="Dados de exemplo (sintéticos) — não representam o projeto"
+                color="warning"
                 size="small"
-                sx={{ fontWeight: 600 }}
+                sx={{ fontWeight: 700 }}
               />
+            ) : (
+              <Chip label={identityLabel} size="small" variant="outlined" sx={{ fontWeight: 600 }} />
             )}
           </Box>
+
+          {!isDemo && allDiagnostics.length > 0 && (
+            <Alert severity="warning" sx={{ marginBottom: '20px', borderRadius: '8px' }}>
+              <strong>{allDiagnostics.length} consulta(s) a APIs falharam.</strong> Os dados abaixo estão incompletos.
+              {allDiagnostics.slice(0, 5).map((d, i) => (
+                <Box key={i} sx={{ fontSize: '12px', mt: 0.5 }}>
+                  • {d.fonte} [{d.local}]: {d.mensagem}
+                </Box>
+              ))}
+            </Alert>
+          )}
+
+          {viewMode === 'dimensions' && dimsData && <RC18DimensionsOverview report={dimsData} />}
 
           {/* VISÃO 2: CLASSIFICAÇÃO DE DADOS SENSÍVEIS E SIGILO BANCÁRIO (Cloud DLP / LGPD) */}
           {viewMode === 'dlp_privacy' && (
             <Box>
+              <Alert severity="info" sx={{ marginBottom: '20px', borderRadius: '8px' }}>
+                {dlpData?.aviso ?? 'Visão complementar: não é uma das 12 dimensões da Resolução Conjunta nº 18/2025.'}
+                {dlpData?.perfisSensitiveDataProtection && (
+                  <Box sx={{ fontSize: '12px', mt: 0.5 }}>
+                    Perfis de tabela do Sensitive Data Protection:{' '}
+                    {dlpData.perfisSensitiveDataProtection.consultado
+                      ? `${formatCount(dlpData.perfisSensitiveDataProtection.quantidade)}${dlpData.perfisSensitiveDataProtection.haMais ? ' ou mais' : ''} encontrado(s) em ${dlpData.perfisSensitiveDataProtection.local} (todas as tabelas do projeto, não só as do escopo)`
+                      : `não consultados (${dlpData.perfisSensitiveDataProtection.erro ?? 'sem detalhe'})`}
+                    .
+                  </Box>
+                )}
+              </Alert>
               {/* DLP Executive Summary Cards */}
               <Grid container spacing={3} sx={{ marginBottom: '28px' }}>
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      CAMPOS PII & SIGILO DETECTADOS
+                      COLUNAS CANDIDATAS OU COM POLICY TAG
                     </Typography>
                     <Typography variant="h3" sx={{ fontWeight: 800, color: '#022FCD', my: 1 }}>
-                      {dlpData?.summary?.totalPiiFieldsDetected ?? 10}
+                      {dlpData?.summary?.totalPiiFieldsDetected ?? 0}
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                      Em {dlpData?.summary?.totalTablesScanned ?? 4} tabelas auditadas
+                      Em {dlpData?.summary?.totalTablesScanned ?? 0} tabelas do escopo
                     </Typography>
                   </Card>
                 </Grid>
@@ -676,10 +771,10 @@ const RC18Dashboard: React.FC = () => {
                       ALTA SENSIBILIDADE (SIGILO / PCI)
                     </Typography>
                     <Typography variant="h3" sx={{ fontWeight: 800, color: '#C5221F', my: 1 }}>
-                      {dlpData?.summary?.highSensitivityFieldsCount ?? 6}
+                      {dlpData?.summary?.highSensitivityFieldsCount ?? 0}
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                      CPF, Cartões, Contas e Chaves PIX
+                      Classificação pelo nome da coluna
                     </Typography>
                   </Card>
                 </Grid>
@@ -687,13 +782,13 @@ const RC18Dashboard: React.FC = () => {
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      MASCARAMENTO DINÂMICO (POLICY TAGS)
+                      COLUNAS COM POLICY TAG
                     </Typography>
-                    <Typography variant="h3" sx={{ fontWeight: 800, color: '#137333', my: 1 }}>
-                      {dlpData?.summary?.overallProtectionCoveragePct ?? 60}%
+                    <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', my: 1 }}>
+                      {formatPct(dlpData?.summary?.overallProtectionCoveragePct)}
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                      {dlpData?.summary?.protectedWithPolicyTagsCount ?? 6} de {dlpData?.summary?.totalPiiFieldsDetected ?? 10} campos protegidos
+                      {dlpData?.summary?.protectedWithPolicyTagsCount ?? 0} de {dlpData?.summary?.totalPiiFieldsDetected ?? 0} colunas com Policy Tag
                     </Typography>
                   </Card>
                 </Grid>
@@ -701,17 +796,19 @@ const RC18Dashboard: React.FC = () => {
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      STATUS REGULATÓRIO (BACEN 18 / LGPD)
+                      PENDÊNCIAS
                     </Typography>
                     <Box sx={{ my: 1.5 }}>
-                      {(dlpData?.summary?.highRiskTablesCount ?? 1) > 0 ? (
-                        <Chip icon={<WarningIcon />} label="Atenção Regulatória" color="warning" sx={{ fontWeight: 700, fontSize: '13px' }} />
+                      {(dlpData?.summary?.totalTablesScanned ?? 0) === 0 ? (
+                        <Chip label="Nenhuma tabela inspecionada" variant="outlined" sx={{ fontWeight: 700, fontSize: '13px' }} />
+                      ) : (dlpData?.summary?.highRiskTablesCount ?? 0) > 0 ? (
+                        <Chip icon={<WarningIcon />} label="Há colunas sem Policy Tag" color="warning" sx={{ fontWeight: 700, fontSize: '13px' }} />
                       ) : (
-                        <Chip icon={<CheckCircleIcon />} label="Totalmente Conforme" color="success" sx={{ fontWeight: 700, fontSize: '13px' }} />
+                        <Chip icon={<CheckCircleIcon />} label="Nenhuma coluna candidata sem Policy Tag" color="success" sx={{ fontWeight: 700, fontSize: '13px' }} />
                       )}
                     </Box>
                     <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                      Requer mascaramento em campos expostos
+                      Tabelas com colunas candidatas sem Policy Tag
                     </Typography>
                   </Card>
                 </Grid>
@@ -720,13 +817,13 @@ const RC18Dashboard: React.FC = () => {
               {/* InfoTypes Tag Cloud */}
               <Paper sx={{ padding: '16px 20px', borderRadius: '14px', border: '1px solid #E0E0E0', marginBottom: '24px', backgroundColor: '#F8F9FA' }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#1F1F1F', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <KeyIcon fontSize="small" sx={{ color: '#1A73E8' }} /> InfoTypes Nativos Detectados no SFN (Sistema Financeiro Nacional):
+                  <KeyIcon fontSize="small" sx={{ color: '#1A73E8' }} /> Categorias identificadas (pelo nome da coluna ou por Policy Tag):
                 </Typography>
                 <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                   {(dlpData?.infoTypeDistribution || []).map((it, idx) => (
                     <Chip
                       key={idx}
-                      label={`${it.displayName} (${it.category}): ${it.count.toLocaleString()} ocorrências`}
+                      label={`${it.displayName} (${it.category}): ${it.count.toLocaleString('pt-BR')} coluna(s)`}
                       sx={{
                         backgroundColor: it.category.includes('Sigilo') ? '#FCE8E6' : '#E8F0FE',
                         color: it.category.includes('Sigilo') ? '#C5221F' : '#1A73E8',
@@ -747,8 +844,8 @@ const RC18Dashboard: React.FC = () => {
                     textColor="primary"
                     indicatorColor="primary"
                   >
-                    <Tab label="📑 Achados Detalhados por Coluna (DLP Inspection)" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
-                    <Tab label="🏢 Risco & Cobertura por Tabela (BigQuery)" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
+                    <Tab label="Colunas (Policy Tags e heurística por nome)" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
+                    <Tab label="Policy Tags por tabela" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
                   </Tabs>
                 </Box>
 
@@ -759,12 +856,12 @@ const RC18Dashboard: React.FC = () => {
                         <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
                           <TableRow>
                             <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Coluna Auditada</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>InfoType Identificado</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Categoria Regulatória</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Coluna</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Tipo sugerido</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Categoria</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Sensibilidade</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Policy Tag (Mascaramento)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Recomendação BACEN 18 / LGPD</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Policy Tag</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Observação</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
@@ -794,9 +891,9 @@ const RC18Dashboard: React.FC = () => {
                               </TableCell>
                               <TableCell>
                                 {f.policyTagApplied ? (
-                                  <Chip icon={<GppGoodIcon />} label="Mascarado (Policy Tag)" color="success" size="small" sx={{ fontWeight: 600 }} />
+                                  <Chip icon={<GppGoodIcon />} label="Com Policy Tag" color="success" size="small" sx={{ fontWeight: 600 }} />
                                 ) : (
-                                  <Chip icon={<WarningIcon />} label="Exposto em Claro" color="error" size="small" sx={{ fontWeight: 600 }} />
+                                  <Chip icon={<WarningIcon />} label="Sem Policy Tag" color="warning" size="small" sx={{ fontWeight: 600 }} />
                                 )}
                               </TableCell>
                               <TableCell sx={{ fontSize: '12px', color: '#5F6368', maxWidth: '280px' }}>
@@ -815,12 +912,11 @@ const RC18Dashboard: React.FC = () => {
                         <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
                           <TableRow>
                             <TableCell sx={{ fontWeight: 700 }}>Tabela do BigQuery</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Colunas Sensíveis</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Campos de Alta Sensibilidade</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>InfoTypes Presentes</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Cobertura de Mascaramento (%)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Nível de Risco</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Status BACEN 18</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Colunas candidatas ou com Policy Tag</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Alta sensibilidade (pelo nome)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Categorias</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Colunas com Policy Tag (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Situação</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
@@ -833,9 +929,7 @@ const RC18Dashboard: React.FC = () => {
                                 </Box>
                               </TableCell>
                               <TableCell sx={{ fontWeight: 600 }}>{trp.totalSensitiveColumns}</TableCell>
-                              <TableCell sx={{ fontWeight: 600, color: trp.highSensitivityColumns > 0 ? '#C5221F' : '#137333' }}>
-                                {trp.highSensitivityColumns}
-                              </TableCell>
+                              <TableCell sx={{ fontWeight: 600 }}>{trp.highSensitivityColumns}</TableCell>
                               <TableCell>
                                 <Box sx={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                                   {trp.detectedInfoTypes.map((it, i) => (
@@ -847,21 +941,10 @@ const RC18Dashboard: React.FC = () => {
                                 {trp.maskingCoveragePct}%
                               </TableCell>
                               <TableCell>
-                                <Chip
-                                  label={trp.riskLevel}
-                                  size="small"
-                                  sx={{
-                                    backgroundColor: trp.riskLevel === 'Alto' ? '#FCE8E6' : trp.riskLevel === 'Médio' ? '#FEF7E0' : '#E6F4EA',
-                                    color: trp.riskLevel === 'Alto' ? '#C5221F' : trp.riskLevel === 'Médio' ? '#B06000' : '#137333',
-                                    fontWeight: 700
-                                  }}
-                                />
-                              </TableCell>
-                              <TableCell>
-                                {trp.complianceStatus === 'Adequado' ? (
-                                  <Chip icon={<CheckCircleIcon />} label="Adequado" color="success" size="small" />
+                                {trp.maskingCoveragePct === 100 ? (
+                                  <Chip icon={<CheckCircleIcon />} label={trp.complianceStatus} color="success" size="small" />
                                 ) : (
-                                  <Chip icon={<WarningIcon />} label={trp.complianceStatus} color="error" size="small" />
+                                  <Chip icon={<WarningIcon />} label={trp.complianceStatus} color="warning" size="small" />
                                 )}
                               </TableCell>
                             </TableRow>
@@ -875,21 +958,34 @@ const RC18Dashboard: React.FC = () => {
             </Box>
           )}
 
-          {/* VISÃO 3: RASTREABILIDADE & LINHAGEM DE DADOS (Data Lineage / Art. 8º BACEN 18) */}
+          {/* RASTREABILIDADE (art. 2º, § 2º, X) — Data Lineage API */}
           {viewMode === 'lineage_traceability' && (
             <Box>
+              {(lineageData?.pipelineDetails?.length ?? 0) === 0 ? (
+                <Alert severity="info" sx={{ marginBottom: '20px', borderRadius: '8px' }}>
+                  Não há tabelas no escopo para consultar na Data Lineage API.
+                </Alert>
+              ) : (
+                (lineageData?.summary?.fullyTraceableTablesCount ?? 0) === 0 && (
+                  <Alert severity="info" sx={{ marginBottom: '20px', borderRadius: '8px' }}>
+                    A Data Lineage API não devolveu origem registrada para nenhuma das tabelas do escopo. Isso indica
+                    apenas que não há elos registrados na API para essas tabelas; a tabela abaixo mostra o que foi
+                    consultado.
+                  </Alert>
+                )
+              )}
               {/* Lineage Summary Cards */}
               <Grid container spacing={3} sx={{ marginBottom: '28px' }}>
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      COBERTURA DE RASTREABILIDADE (ART. 8º)
+                      TABELAS COM ORIGEM REGISTRADA (INCISO X)
                     </Typography>
                     <Typography variant="h3" sx={{ fontWeight: 800, color: '#022FCD', my: 1 }}>
-                      {lineageData?.summary?.traceabilityCoveragePct ?? 100}%
+                      {formatPct(lineageData?.summary?.traceabilityCoveragePct)}
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                      {lineageData?.summary?.fullyTraceableTablesCount ?? 5} de {lineageData?.summary?.totalTablesAudited ?? 5} tabelas rastreadas
+                      {lineageData?.summary?.fullyTraceableTablesCount ?? 0} de {lineageData?.summary?.totalTablesAudited ?? 0} tabelas do escopo
                     </Typography>
                   </Card>
                 </Grid>
@@ -897,13 +993,13 @@ const RC18Dashboard: React.FC = () => {
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      PIPELINES & JOBS AUDITADOS
+                      PROCESSOS REGISTRADOS
                     </Typography>
                     <Typography variant="h3" sx={{ fontWeight: 800, color: '#1A73E8', my: 1 }}>
-                      {lineageData?.summary?.totalTransformationPipelines ?? 5}
+                      {lineageData?.summary?.totalTransformationPipelines ?? 0}
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                      Dataform, Spark e BigQuery Scheduled
+                      Processos ligados às origens na Data Lineage API
                     </Typography>
                   </Card>
                 </Grid>
@@ -911,13 +1007,13 @@ const RC18Dashboard: React.FC = () => {
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      DESTINOS REGULATÓRIOS BACEN
+                      DESTINOS REGISTRADOS
                     </Typography>
                     <Typography variant="h3" sx={{ fontWeight: 800, color: '#137333', my: 1 }}>
-                      {lineageData?.summary?.regulatoryReportsMapped ?? 5}
+                      {lineageData?.summary?.regulatoryReportsMapped ?? 0}
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                      CADOC 3040/SCR, DLO, DRL e PLD/FT
+                      Ativos a jusante na Data Lineage API
                     </Typography>
                   </Card>
                 </Grid>
@@ -925,13 +1021,13 @@ const RC18Dashboard: React.FC = () => {
                 <Grid size={{ xs: 12, sm: 6, md: 3 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      STATUS REGULATÓRIO (ART. 8º)
+                      DISPOSITIVO
                     </Typography>
-                    <Box sx={{ my: 1.5 }}>
-                      <Chip icon={<CheckCircleIcon />} label="100% Conforme" color="success" sx={{ fontWeight: 700, fontSize: '13px' }} />
-                    </Box>
+                    <Typography variant="h6" sx={{ fontWeight: 800, color: '#1F1F1F', my: 1 }}>
+                      Art. 2º, § 2º, X
+                    </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                      Cadeia de custódia completa sem elos rompidos
+                      Indicador técnico; não atesta conformidade
                     </Typography>
                   </Card>
                 </Grid>
@@ -942,10 +1038,10 @@ const RC18Dashboard: React.FC = () => {
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
                   <Box>
                     <Typography variant="h6" sx={{ fontWeight: 700, color: '#1F1F1F', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <AccountTreeIcon sx={{ color: '#022FCD' }} /> Arquitetura Visual de Rastreabilidade Regulatória (Data Lifecycle Flow)
+                      <AccountTreeIcon sx={{ color: '#022FCD' }} /> Rastreabilidade registrada na Data Lineage API
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                      Mapeamento ponta a ponta: Ingestão ➔ Transformação ➔ Tabelas Curadas BigQuery ➔ Relatórios BACEN
+                      Origens ➔ processos ➔ tabelas do escopo ➔ destinos (somente o que está registrado na API)
                     </Typography>
                   </Box>
 
@@ -979,12 +1075,17 @@ const RC18Dashboard: React.FC = () => {
                   <Grid size={{ xs: 12, md: 3 }}>
                     <Paper sx={{ p: 2, height: '100%', backgroundColor: '#FFF', borderRadius: '12px', border: '1px solid #DADCE0' }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#1A73E8', mb: 2, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <StorageIcon fontSize="small" /> 1. Origem & Ingestão
+                        <StorageIcon fontSize="small" /> 1. Origens registradas
                       </Typography>
                       <Stack spacing={1.5}>
+                        {(lineageData?.nodes?.filter(n => n.type === 'source') || []).length === 0 && (
+                          <Typography variant="caption" sx={{ color: '#5F6368' }}>
+                            Nenhum registro.
+                          </Typography>
+                        )}
                         {(lineageData?.nodes?.filter(n => n.type === 'source') || []).map((node, idx) => (
                           <Box key={idx} sx={{ p: 1.5, borderRadius: '8px', backgroundColor: '#F8F9FA', border: '1px solid #E8EAED' }}>
-                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#202124', fontSize: '13px' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#202124', fontSize: '13px', overflowWrap: 'anywhere' }}>
                               {node.label}
                             </Typography>
                             <Typography variant="caption" sx={{ color: '#5F6368', display: 'block' }}>
@@ -1001,19 +1102,24 @@ const RC18Dashboard: React.FC = () => {
                   <Grid size={{ xs: 12, md: 3 }}>
                     <Paper sx={{ p: 2, height: '100%', backgroundColor: '#FFF', borderRadius: '12px', border: '1px solid #DADCE0' }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#7E22CE', mb: 2, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <CodeIcon fontSize="small" /> 2. Transformação (ETL)
+                        <CodeIcon fontSize="small" /> 2. Processos
                       </Typography>
                       <Stack spacing={1.5}>
+                        {(lineageData?.nodes?.filter(n => n.type === 'process') || []).length === 0 && (
+                          <Typography variant="caption" sx={{ color: '#5F6368' }}>
+                            Nenhum registro.
+                          </Typography>
+                        )}
                         {(lineageData?.nodes?.filter(n => n.type === 'process') || []).map((node, idx) => (
                           <Box key={idx} sx={{ p: 1.5, borderRadius: '8px', backgroundColor: '#FAF5FF', border: '1px solid #E9D5FF' }}>
-                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#581C87', fontSize: '13px' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#581C87', fontSize: '13px', overflowWrap: 'anywhere' }}>
                               {node.label}
                             </Typography>
                             <Typography variant="caption" sx={{ color: '#6B7280', display: 'block' }}>
-                              Motor: {node.engine}
+                              {node.engine ? `Origem do processo: ${node.engine}` : 'Origem do processo não informada'}
                             </Typography>
                             <Typography variant="caption" sx={{ color: '#6B7280', display: 'block', fontSize: '11px' }}>
-                              Frequência: {node.schedule}
+                              {node.schedule ? `Frequência: ${node.schedule}` : ''}
                             </Typography>
                           </Box>
                         ))}
@@ -1025,9 +1131,14 @@ const RC18Dashboard: React.FC = () => {
                   <Grid size={{ xs: 12, md: 3 }}>
                     <Paper sx={{ p: 2, height: '100%', backgroundColor: '#FFF', borderRadius: '12px', border: '1px solid #DADCE0' }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#022FCD', mb: 2, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <TableChartIcon fontSize="small" /> 3. Tabelas Curadas (BQ)
+                        <TableChartIcon fontSize="small" /> 3. Tabelas do escopo
                       </Typography>
                       <Stack spacing={1.5}>
+                        {(lineageData?.nodes?.filter(n => n.type === 'table') || []).length === 0 && (
+                          <Typography variant="caption" sx={{ color: '#5F6368' }}>
+                            Nenhum registro.
+                          </Typography>
+                        )}
                         {(lineageData?.nodes?.filter(n => n.type === 'table') || []).map((node, idx) => (
                           <Box
                             key={idx}
@@ -1042,17 +1153,17 @@ const RC18Dashboard: React.FC = () => {
                               '&:hover': { borderColor: '#1A73E8' }
                             }}
                           >
-                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#022FCD', fontSize: '13px' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#022FCD', fontSize: '13px', overflowWrap: 'anywhere' }}>
                               {node.label}
                             </Typography>
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mt: 0.5 }}>
                               <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                                {node.rows} linhas
+                                {node.rows ? `${node.rows} linhas` : 'BigQuery'}
                               </Typography>
                               <Chip
-                                label={`DQ: ${node.qualityScore}%`}
+                                label={node.qualityScore === null || node.qualityScore === undefined ? 'Regras: sem execução' : `Regras aprovadas: ${formatPct(node.qualityScore)}`}
                                 size="small"
-                                color={node.qualityScore && node.qualityScore >= 98 ? 'success' : 'warning'}
+                                color={node.qualityScore === null || node.qualityScore === undefined ? 'default' : node.qualityScore === 100 ? 'success' : 'warning'}
                                 sx={{ height: '20px', fontSize: '11px', fontWeight: 700 }}
                               />
                             </Box>
@@ -1066,19 +1177,24 @@ const RC18Dashboard: React.FC = () => {
                   <Grid size={{ xs: 12, md: 3 }}>
                     <Paper sx={{ p: 2, height: '100%', backgroundColor: '#FFF', borderRadius: '12px', border: '1px solid #DADCE0' }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 700, color: '#137333', mb: 2, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <FactCheckIcon fontSize="small" /> 4. Destinos BACEN
+                        <FactCheckIcon fontSize="small" /> 4. Destinos registrados
                       </Typography>
                       <Stack spacing={1.5}>
+                        {(lineageData?.nodes?.filter(n => n.type === 'target') || []).length === 0 && (
+                          <Typography variant="caption" sx={{ color: '#5F6368' }}>
+                            Nenhum registro.
+                          </Typography>
+                        )}
                         {(lineageData?.nodes?.filter(n => n.type === 'target') || []).map((node, idx) => (
                           <Box key={idx} sx={{ p: 1.5, borderRadius: '8px', backgroundColor: '#F0FDF4', border: '1px solid #DCFCE7' }}>
-                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#14532D', fontSize: '13px' }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700, color: '#14532D', fontSize: '13px', overflowWrap: 'anywhere' }}>
                               {node.label}
                             </Typography>
                             <Typography variant="caption" sx={{ color: '#15803D', display: 'block' }}>
-                              Órgão: {node.regulatoryEntity}
+                              {node.regulatoryEntity}
                             </Typography>
                             <Typography variant="caption" sx={{ color: '#4B5563', display: 'block', fontSize: '11px' }}>
-                              Periodicidade: {node.deadline}
+                              {node.deadline ? `Periodicidade: ${node.deadline}` : ''}
                             </Typography>
                           </Box>
                         ))}
@@ -1097,8 +1213,8 @@ const RC18Dashboard: React.FC = () => {
                     textColor="primary"
                     indicatorColor="primary"
                   >
-                    <Tab label="📋 Cadeia de Custódia & Rastreabilidade de Pipelines" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
-                    <Tab label="⚙️ Especificação Técnica & Queries de Transformação" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
+                    <Tab label="Rastreabilidade por tabela" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
+                    <Tab label="Processos registrados" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
                   </Tabs>
                 </Box>
 
@@ -1108,13 +1224,13 @@ const RC18Dashboard: React.FC = () => {
                       <Table sx={{ minWidth: 750 }}>
                         <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
                           <TableRow>
-                            <TableCell sx={{ fontWeight: 700 }}>Tabela BigQuery Auditada</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Origem & Ingestão</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Motor de Transformação</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Destinos Regulatórios BACEN</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Colunas Rastreadas</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Status Art. 8º</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Nota de Conformidade</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Tabela do escopo</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Origem registrada</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Tipo de processo</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Destinos registrados</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Elos</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Situação</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Observação</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
@@ -1146,7 +1262,7 @@ const RC18Dashboard: React.FC = () => {
                                   {p.columnLineageCount}
                                 </TableCell>
                                 <TableCell>
-                                  <Chip icon={<CheckCircleIcon />} label={p.traceabilityStatus} color="success" size="small" sx={{ fontWeight: 700 }} />
+                                  <Chip label={p.traceabilityStatus} color={p.hasUpstream ? 'success' : 'warning'} size="small" sx={{ fontWeight: 700 }} />
                                 </TableCell>
                                 <TableCell sx={{ fontSize: '12px', color: '#5F6368', maxWidth: '280px' }}>
                                   {p.complianceNote}
@@ -1164,10 +1280,10 @@ const RC18Dashboard: React.FC = () => {
                         <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
                           <TableRow>
                             <TableCell sx={{ fontWeight: 700 }}>Processo / Pipeline</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Motor de Execução</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Agendamento / Frequência</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Script / Lógica de Transformação</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Controles de Integridade</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Origem (sourceType)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Agendamento</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Nome de origem</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Identificador</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
@@ -1176,15 +1292,15 @@ const RC18Dashboard: React.FC = () => {
                               <TableCell sx={{ fontWeight: 700, color: '#7E22CE', fontFamily: 'monospace' }}>
                                 {proc.label}
                               </TableCell>
-                              <TableCell sx={{ fontWeight: 600 }}>{proc.engine}</TableCell>
+                              <TableCell sx={{ fontWeight: 600 }}>{proc.engine || '—'}</TableCell>
                               <TableCell>
-                                <Chip label={proc.schedule} size="small" variant="outlined" sx={{ fontWeight: 600 }} />
+                                {proc.schedule ? <Chip label={proc.schedule} size="small" variant="outlined" sx={{ fontWeight: 600 }} /> : 'não informado pela API'}
                               </TableCell>
                               <TableCell sx={{ fontSize: '13px', color: '#374151', fontFamily: 'monospace' }}>
-                                {proc.script}
+                                {proc.script || '—'}
                               </TableCell>
                               <TableCell>
-                                <Chip icon={<FactCheckIcon />} label="Auditado & Versionado" color="primary" size="small" sx={{ fontWeight: 600 }} />
+                                {proc.processId || '—'}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -1200,18 +1316,23 @@ const RC18Dashboard: React.FC = () => {
           {/* VISÃO 4: VISÃO CENTRALIZADA (Knowledge Catalog lookupContext) */}
           {viewMode === 'centralized' && (
             <Box>
+              {isDemo && (
+                <Alert severity="info" sx={{ marginBottom: '20px', borderRadius: '8px' }}>
+                  No modo de exemplo as entradas são sintéticas e o método lookupContext não é chamado.
+                </Alert>
+              )}
               {/* Centralized Catalog Summary Cards */}
               <Grid container spacing={3} sx={{ marginBottom: '28px' }}>
                 <Grid size={{ xs: 12, md: 4 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      ATIVOS DO CATÁLOGO MAPEADOS (LOOKUP)
+                      TABELAS DO ESCOPO NO CATÁLOGO
                     </Typography>
                     <Typography variant="h3" sx={{ fontWeight: 800, color: '#022FCD', my: 1 }}>
-                      {centralizedContextList.length}
+                      {centralizedContextList.filter((c) => c.found !== false).length} de {centralizedContextList.length}
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368' }}>
-                      Entidades vinculadas no Knowledge Catalog
+                      Entradas encontradas (GetEntry)
                     </Typography>
                   </Card>
                 </Grid>
@@ -1219,13 +1340,13 @@ const RC18Dashboard: React.FC = () => {
                 <Grid size={{ xs: 12, md: 4 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      DOMÍNIOS DE GOVERNANÇA CENTRALIZADOS
+                      DATASETS NO ESCOPO
                     </Typography>
                     <Typography variant="h3" sx={{ fontWeight: 800, color: '#137333', my: 1 }}>
                       {new Set(centralizedContextList.map(c => c.governanceDomain)).size}
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368' }}>
-                      Datasets / grupos de governança ativos
+                      Datasets das tabelas do escopo
                     </Typography>
                   </Card>
                 </Grid>
@@ -1233,15 +1354,13 @@ const RC18Dashboard: React.FC = () => {
                 <Grid size={{ xs: 12, md: 4 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      CONFORMIDADE GERAL DE CONTEXTO
+                      ENTRADAS COM SCORECARD DE QUALIDADE
                     </Typography>
                     <Typography variant="h3" sx={{ fontWeight: 800, color: '#1A73E8', my: 1 }}>
-                      {centralizedContextList.length > 0
-                        ? Math.round(centralizedContextList.reduce((acc, c) => acc + c.dataQualityScore, 0) / centralizedContextList.length)
-                        : 100}%
+                      {centralizedContextList.filter((c) => c.hasScorecardAspect).length}
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368' }}>
-                      Índice central de qualidade (RC 18/2025)
+                      Entradas com o aspecto data-quality-scorecard
                     </Typography>
                   </Card>
                 </Grid>
@@ -1251,22 +1370,24 @@ const RC18Dashboard: React.FC = () => {
               <Paper sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', overflow: 'hidden' }}>
                 <Box sx={{ backgroundColor: '#F8F9FA', px: 3, py: 2, borderBottom: '1px solid #E0E0E0' }}>
                   <Typography variant="h6" sx={{ fontWeight: 700, fontSize: '17px', color: '#1F1F1F' }}>
-                    🌐 Visão Centralizada de Governança e Metadados (Knowledge Catalog lookupContext)
+                    Entradas do Knowledge Catalog das tabelas do escopo
                   </Typography>
                   <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                    Resultados centralizados de contexto de catálogo e aspectos de governança cruzados com as análises de qualidade de dados.
+                    Aspectos lidos com GetEntry (contatos, documentação, uso e scorecard); regras de qualidade vindas dos
+                    DataScans. Contatos alimentam o indicador de acessibilidade (inciso I) e as consultas, o de relevância
+                    (inciso XI).
                   </Typography>
                 </Box>
                 <TableContainer>
-                  <Table sx={{ minWidth: 700 }}>
+                  <Table sx={{ minWidth: 700 }} title="Entradas do Knowledge Catalog">
                     <TableHead sx={{ backgroundColor: '#FAFAFA' }}>
                       <TableRow>
-                        <TableCell sx={{ fontWeight: 700 }}>Entidade no Knowledge Catalog (lookupEntry)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Recurso Vinculado (Linked Resource)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Grupo de Entradas / Domínio</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Aspectos do Catálogo (Aspect Types)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Escore Central (%)</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Status RC18</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Entrada (tabela • dataset)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Aspectos na entrada</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Contatos</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Consultas (30 dias)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Regras aprovadas (%)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Regras de qualidade</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1275,14 +1396,19 @@ const RC18Dashboard: React.FC = () => {
                           <TableCell sx={{ fontWeight: 700, color: '#022FCD' }}>
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <HubIcon fontSize="small" sx={{ color: '#022FCD' }} />
-                              {item.displayName}
+                              <Box>
+                                {item.displayName}
+                                <Typography variant="caption" sx={{ display: 'block', color: '#5F6368', fontWeight: 400 }}>
+                                  {item.governanceDomain} • {item.entryGroup}
+                                  {item.entryLocation ? ` • ${item.entryLocation}` : ''}
+                                </Typography>
+                                {item.found === false && (
+                                  <Typography variant="caption" sx={{ display: 'block', color: '#B06000', fontWeight: 400 }}>
+                                    Entrada não lida: {item.error ?? 'sem detalhe'}
+                                  </Typography>
+                                )}
+                              </Box>
                             </Box>
-                          </TableCell>
-                          <TableCell sx={{ fontSize: '12px', fontFamily: 'monospace', color: '#5F6368' }}>
-                            {item.linkedResource}
-                          </TableCell>
-                          <TableCell>
-                            <Chip label={`${item.entryGroup} • ${item.governanceDomain}`} size="small" variant="outlined" sx={{ fontWeight: 600 }} />
                           </TableCell>
                           <TableCell>
                             <Box sx={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -1296,16 +1422,20 @@ const RC18Dashboard: React.FC = () => {
                               ))}
                             </Box>
                           </TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>{item.found === false ? '—' : formatCount(item.contactsCount)}</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>
+                            {item.found === false ? '—' : item.queries30d === null || item.queries30d === undefined ? 'não informado' : formatCount(item.queries30d)}
+                          </TableCell>
                           <TableCell sx={{ fontWeight: 800, fontSize: '15px' }}>
-                            {item.dataQualityScore}%
+                            {formatPct(item.dataQualityScore)}
                           </TableCell>
                           <TableCell>
-                            {item.complianceStatus === 'Conforme' ? (
-                              <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
-                            ) : item.complianceStatus === 'Atenção' ? (
-                              <Chip icon={<WarningIcon />} label="Requer Atenção" color="warning" size="small" />
+                            {item.complianceStatus === 'Sem falhas' ? (
+                              <Chip icon={<CheckCircleIcon />} label="Sem falhas" color="success" size="small" />
+                            ) : item.complianceStatus === 'Com falhas' ? (
+                              <Chip icon={<WarningIcon />} label="Com falhas" color="warning" size="small" />
                             ) : (
-                              <Chip icon={<WarningIcon />} label="Crítico" color="error" size="small" />
+                              <Chip label="Sem execução" size="small" variant="outlined" />
                             )}
                           </TableCell>
                         </TableRow>
@@ -1319,10 +1449,10 @@ const RC18Dashboard: React.FC = () => {
                 <Paper sx={{ mt: 3, borderRadius: '16px', border: '1px solid #E0E0E0', overflow: 'hidden' }}>
                   <Box sx={{ backgroundColor: '#F8F9FA', px: 3, py: 2, borderBottom: '1px solid #E0E0E0' }}>
                     <Typography variant="subtitle1" sx={{ fontWeight: 700, color: '#1F1F1F' }}>
-                      📄 Contexto Semântico Unificado (Resposta Real `POST :lookupContext` YAML)
+                      Resposta do método lookupContext (YAML)
                     </Typography>
                     <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                      Bundle estruturado retornado pelo Context Engine do Knowledge Catalog para agentes de IA e governança centralizada.
+                      Contexto devolvido pela API para as entradas acima (até 10 por localização).
                     </Typography>
                   </Box>
                   <Box
@@ -1349,6 +1479,11 @@ const RC18Dashboard: React.FC = () => {
           {/* VISÃO 2: VISÃO DE QUALIDADE DE DADOS POR TABELA */}
           {viewMode === 'by_table' && (
             <Box>
+              {tableSummariesList.length === 0 && (
+                <Alert severity="info" sx={{ marginBottom: '20px', borderRadius: '8px' }}>
+                  Nenhum DataScan de qualidade de dados encontrado para este projeto e localização.
+                </Alert>
+              )}
               {/* Executive Overview Cards for Dimensions 1, 2 & 3 */}
               <Grid container spacing={3} sx={{ marginBottom: '32px' }}>
                 {/* Dimensão 1: Acurácia */}
@@ -1366,35 +1501,19 @@ const RC18Dashboard: React.FC = () => {
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <Box>
                           <Chip
-                            label="Dimensão 1 • Conteúdo & Exatidão"
+                            label="Inciso II • art. 2º, § 2º"
                             size="small"
                             sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8', fontWeight: 600, marginBottom: '8px' }}
                           />
                           <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
-                            Acurácia (Accuracy)
+                            Acurácia
                           </Typography>
                         </Box>
-                        <Box
-                          sx={{
-                            width: '56px',
-                            height: '56px',
-                            borderRadius: '50%',
-                            backgroundColor: (accuracy?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}
-                        >
-                          {(accuracy?.scorePct ?? 0) >= 95 ? (
-                            <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
-                          ) : (
-                            <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
-                          )}
-                        </Box>
+                        {renderScoreBadge(accuracy?.scorePct)}
                       </Box>
 
                       <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
-                        {accuracy?.scorePct ?? 100}%
+                        {formatPct(accuracy?.scorePct)}
                       </Typography>
 
                       <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
@@ -1403,9 +1522,9 @@ const RC18Dashboard: React.FC = () => {
 
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
                         <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                          Regras em conformidade:
+                          Regras aprovadas:
                         </Typography>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#1F1F1F' }}>
                           {accuracy?.rulesPassed ?? 0} / {accuracy?.rulesEvaluated ?? 0}
                         </Typography>
                       </Box>
@@ -1428,35 +1547,19 @@ const RC18Dashboard: React.FC = () => {
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <Box>
                           <Chip
-                            label="Dimensão 2 • Conteúdo & Exatidão"
+                            label="Inciso VI • art. 2º, § 2º"
                             size="small"
                             sx={{ backgroundColor: '#E6F4EA', color: '#137333', fontWeight: 600, marginBottom: '8px' }}
                           />
                           <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
-                            Completude (Completeness)
+                            Completude
                           </Typography>
                         </Box>
-                        <Box
-                          sx={{
-                            width: '56px',
-                            height: '56px',
-                            borderRadius: '50%',
-                            backgroundColor: (completeness?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}
-                        >
-                          {(completeness?.scorePct ?? 0) >= 95 ? (
-                            <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
-                          ) : (
-                            <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
-                          )}
-                        </Box>
+                        {renderScoreBadge(completeness?.scorePct)}
                       </Box>
 
                       <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
-                        {completeness?.scorePct ?? 100}%
+                        {formatPct(completeness?.scorePct)}
                       </Typography>
 
                       <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
@@ -1465,9 +1568,9 @@ const RC18Dashboard: React.FC = () => {
 
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
                         <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                          Regras em conformidade:
+                          Regras aprovadas:
                         </Typography>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#1F1F1F' }}>
                           {completeness?.rulesPassed ?? 0} / {completeness?.rulesEvaluated ?? 0}
                         </Typography>
                       </Box>
@@ -1490,35 +1593,19 @@ const RC18Dashboard: React.FC = () => {
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <Box>
                           <Chip
-                            label="Dimensão 3 • Conteúdo & Exatidão"
+                            label="Inciso VIII • art. 2º, § 2º"
                             size="small"
                             sx={{ backgroundColor: '#F3E8FF', color: '#7E22CE', fontWeight: 600, marginBottom: '8px' }}
                           />
                           <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
-                            Consistência (Consistency)
+                            Consistência
                           </Typography>
                         </Box>
-                        <Box
-                          sx={{
-                            width: '56px',
-                            height: '56px',
-                            borderRadius: '50%',
-                            backgroundColor: (consistency?.scorePct ?? 0) >= 95 ? '#E6F4EA' : '#FEF7E0',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center'
-                          }}
-                        >
-                          {(consistency?.scorePct ?? 0) >= 95 ? (
-                            <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
-                          ) : (
-                            <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
-                          )}
-                        </Box>
+                        {renderScoreBadge(consistency?.scorePct)}
                       </Box>
 
                       <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
-                        {consistency?.scorePct ?? 100}%
+                        {formatPct(consistency?.scorePct)}
                       </Typography>
 
                       <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
@@ -1527,9 +1614,9 @@ const RC18Dashboard: React.FC = () => {
 
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
                         <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                          Regras em conformidade:
+                          Regras aprovadas:
                         </Typography>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#137333' }}>
+                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#1F1F1F' }}>
                           {consistency?.rulesPassed ?? 0} / {consistency?.rulesEvaluated ?? 0}
                         </Typography>
                       </Box>
@@ -1547,10 +1634,10 @@ const RC18Dashboard: React.FC = () => {
                     textColor="primary"
                     indicatorColor="primary"
                   >
-                    <Tab label="📊 Visão de Qualidade por Tabela" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
-                    <Tab label="Dimensão 1: Acurácia" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
-                    <Tab label="Dimensão 2: Completude" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
-                    <Tab label="Dimensão 3: Consistência" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
+                    <Tab label="Regras por tabela" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
+                    <Tab label="Acurácia (II)" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
+                    <Tab label="Completude (VI)" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
+                    <Tab label="Consistência (VIII)" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
                   </Tabs>
                 </Box>
 
@@ -1560,13 +1647,13 @@ const RC18Dashboard: React.FC = () => {
                       <Table sx={{ minWidth: 650 }}>
                         <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
                           <TableRow>
-                            <TableCell sx={{ fontWeight: 700 }}>Tabela Auditada (Dataset.Tabela)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Tabela (dataset.tabela)</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Acurácia (%)</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Completude (%)</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Consistência (%)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Escore Geral (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Regras aprovadas (%)</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Regras (Aprovadas/Total)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Status Geral</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Situação</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
@@ -1578,17 +1665,17 @@ const RC18Dashboard: React.FC = () => {
                                   {ts.fullTableName}
                                 </Box>
                               </TableCell>
-                              <TableCell sx={{ fontWeight: 600, color: ts.accuracyScore >= 95 ? '#137333' : '#B06000' }}>
-                                {ts.accuracyScore}%
+                              <TableCell sx={{ fontWeight: 600, color: scoreColor(ts.accuracyScore) }}>
+                                {formatPct(ts.accuracyScore)}
                               </TableCell>
-                              <TableCell sx={{ fontWeight: 600, color: ts.completenessScore >= 95 ? '#137333' : '#B06000' }}>
-                                {ts.completenessScore}%
+                              <TableCell sx={{ fontWeight: 600, color: scoreColor(ts.completenessScore) }}>
+                                {formatPct(ts.completenessScore)}
                               </TableCell>
-                              <TableCell sx={{ fontWeight: 600, color: ts.consistencyScore >= 95 ? '#137333' : '#B06000' }}>
-                                {ts.consistencyScore}%
+                              <TableCell sx={{ fontWeight: 600, color: scoreColor(ts.consistencyScore) }}>
+                                {formatPct(ts.consistencyScore)}
                               </TableCell>
                               <TableCell sx={{ fontWeight: 800, fontSize: '15px' }}>
-                                {ts.overallScore}%
+                                {formatPct(ts.overallScore)}
                               </TableCell>
                               <TableCell>
                                 <Chip
@@ -1599,12 +1686,12 @@ const RC18Dashboard: React.FC = () => {
                                 />
                               </TableCell>
                               <TableCell>
-                                {ts.status === 'Conforme' ? (
-                                  <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
-                                ) : ts.status === 'Atenção' ? (
-                                  <Chip icon={<WarningIcon />} label="Requer Atenção" color="warning" size="small" />
+                                {ts.status === 'Sem falhas' ? (
+                                  <Chip icon={<CheckCircleIcon />} label="Sem falhas" color="success" size="small" />
+                                ) : ts.status === 'Com falhas' ? (
+                                  <Chip icon={<WarningIcon />} label="Com falhas" color="warning" size="small" />
                                 ) : (
-                                  <Chip icon={<WarningIcon />} label="Crítico" color="error" size="small" />
+                                  <Chip label="Sem execução" size="small" variant="outlined" />
                                 )}
                               </TableCell>
                             </TableRow>
@@ -1623,7 +1710,7 @@ const RC18Dashboard: React.FC = () => {
                             <TableCell sx={{ fontWeight: 700 }}>Coluna</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Conformidade (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Linhas aprovadas (%)</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
                           </TableRow>
                         </TableHead>
@@ -1633,14 +1720,10 @@ const RC18Dashboard: React.FC = () => {
                               <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
                               <TableCell>{rule.column}</TableCell>
                               <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
-                              <TableCell>{rule.evaluatedCount.toLocaleString()}</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>{rule.passPercentage}%</TableCell>
+                              <TableCell>{formatCount(rule.evaluatedCount)}</TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>{formatPct(rule.passPercentage)}</TableCell>
                               <TableCell>
-                                {rule.passed ? (
-                                  <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
-                                ) : (
-                                  <Chip icon={<WarningIcon />} label="Falha" color="error" size="small" />
-                                )}
+                                {renderRuleStatus(rule)}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -1658,7 +1741,7 @@ const RC18Dashboard: React.FC = () => {
                             <TableCell sx={{ fontWeight: 700 }}>Coluna</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Conformidade (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Linhas aprovadas (%)</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
                           </TableRow>
                         </TableHead>
@@ -1668,14 +1751,10 @@ const RC18Dashboard: React.FC = () => {
                               <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
                               <TableCell>{rule.column}</TableCell>
                               <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
-                              <TableCell>{rule.evaluatedCount.toLocaleString()}</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>{rule.passPercentage}%</TableCell>
+                              <TableCell>{formatCount(rule.evaluatedCount)}</TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>{formatPct(rule.passPercentage)}</TableCell>
                               <TableCell>
-                                {rule.passed ? (
-                                  <Chip icon={<CheckCircleIcon />} label="Conforme" color="success" size="small" />
-                                ) : (
-                                  <Chip icon={<WarningIcon />} label="Falha" color="error" size="small" />
-                                )}
+                                {renderRuleStatus(rule)}
                               </TableCell>
                             </TableRow>
                           ))}
@@ -1689,11 +1768,11 @@ const RC18Dashboard: React.FC = () => {
                       <Table sx={{ minWidth: 650 }}>
                         <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
                           <TableRow>
-                            <TableCell sx={{ fontWeight: 700 }}>Regra de Consistência Lógica</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Atributos Comparados</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Nome da Regra</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Coluna</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Conformidade (%)</TableCell>
+                            <TableCell sx={{ fontWeight: 700 }}>Linhas aprovadas (%)</TableCell>
                             <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
                           </TableRow>
                         </TableHead>
@@ -1703,14 +1782,10 @@ const RC18Dashboard: React.FC = () => {
                               <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
                               <TableCell>{rule.column}</TableCell>
                               <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
-                              <TableCell>{rule.evaluatedCount.toLocaleString()}</TableCell>
-                              <TableCell sx={{ fontWeight: 700, color: '#137333' }}>{rule.passPercentage}%</TableCell>
+                              <TableCell>{formatCount(rule.evaluatedCount)}</TableCell>
+                              <TableCell sx={{ fontWeight: 700 }}>{formatPct(rule.passPercentage)}</TableCell>
                               <TableCell>
-                                {rule.passed ? (
-                                  <Chip icon={<CheckCircleIcon />} label="Sem Contradição" color="success" size="small" />
-                                ) : (
-                                  <Chip icon={<WarningIcon />} label="Inconsistência" color="error" size="small" />
-                                )}
+                                {renderRuleStatus(rule)}
                               </TableCell>
                             </TableRow>
                           ))}
