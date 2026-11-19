@@ -96,12 +96,29 @@ describe('RC18Dashboard', () => {
     expect(within(integridade).getByText(/Limite do indicador: Reflete apenas as regras que a instituição marcou/)).toBeInTheDocument();
     expect(within(integridade).queryByText(/Sem coleta automática/)).toBeNull();
 
-    for (const id of ['adaptabilidade', 'comparabilidade', 'confiabilidade']) {
-      const card = screen.getByTestId(`rc18-dimensao-${id}`);
-      expect(within(card).getByText('Não medido automaticamente')).toBeInTheDocument();
-      expect(within(card).queryByText(/%/)).toBeNull();
-      expect(within(card).getByText(/marque regras de DataScan com a dimensão personalizada/)).toBeInTheDocument();
-    }
+    // Confiabilidade: medida por regras que comparam a versão revisada com a informada.
+    const confiabilidade = screen.getByTestId('rc18-dimensao-confiabilidade');
+    expect(within(confiabilidade).getByText('50%')).toBeInTheDocument();
+    expect(within(confiabilidade).getByText(/1 de 2 regras — Regras de qualidade aprovadas/)).toBeInTheDocument();
+
+    // Comparabilidade: regras marcadas com a dimensão e termos de glossário vinculados.
+    const comparabilidade = screen.getByTestId('rc18-dimensao-comparabilidade');
+    expect(within(comparabilidade).getByText(/1 de 1 regras — Regras de qualidade aprovadas/)).toBeInTheDocument();
+    expect(within(comparabilidade).getByText(/2 de 4 tabelas — Tabelas do escopo com termo de glossário vinculado/)).toBeInTheDocument();
+
+    // Dimensão sem regras marcadas: sem percentual, e o caminho para medir já aparece aberto.
+    const adaptabilidade = screen.getByTestId('rc18-dimensao-adaptabilidade');
+    expect(within(adaptabilidade).getByText('Não medido automaticamente')).toBeInTheDocument();
+    expect(within(adaptabilidade).queryByText(/%/)).toBeNull();
+    expect(within(adaptabilidade).getByText(/marque regras de DataScan com a dimensão personalizada/)).toBeInTheDocument();
+    const medicao = within(adaptabilidade).getByTestId('rc18-medicao-adaptabilidade');
+    expect(within(medicao).getByText('BigQuery — tabela de controle:')).toBeInTheDocument();
+    expect(within(medicao).getByText('Dataplex — regras de qualidade (ADAPTABILIDADE):')).toBeInTheDocument();
+
+    // Dimensão já medida: a orientação fica recolhida até ser pedida.
+    expect(within(acuracia).queryByTestId('rc18-medicao-acuracia')).toBeNull();
+    fireEvent.click(within(acuracia).getByRole('button', { name: 'Como medir no Google Cloud' }));
+    expect(within(acuracia).getByTestId('rc18-medicao-acuracia')).toBeInTheDocument();
 
     expect(screen.getByText('Dados de exemplo (sintéticos) — não representam o projeto')).toBeInTheDocument();
     expect(screen.getByText(/não atesta conformidade regulatória/)).toBeInTheDocument();
@@ -115,20 +132,72 @@ describe('RC18Dashboard', () => {
     await screen.findByTestId('rc18-dimensao-acuracia');
   };
 
-  it('visão "Qualidade por tabela": regras por tabela e por dimensão', async () => {
+  it('visão "Qualidade por tabela": regras de todas as dimensões com regras, por tabela e por dimensão', async () => {
     await abrirPainel(respostas.demo);
     abrirVisao('Qualidade por tabela');
+
+    // Um cartão por dimensão com regras — inclusive as personalizadas; nenhum para as demais.
+    expect(screen.getAllByTestId(/^rc18-grupo-/).map((c) => c.getAttribute('data-testid'))).toEqual([
+      'rc18-grupo-acuracia',
+      'rc18-grupo-comparabilidade',
+      'rc18-grupo-completude',
+      'rc18-grupo-confiabilidade',
+      'rc18-grupo-consistencia',
+      'rc18-grupo-integridade',
+      'rc18-grupo-tempestividade',
+    ]);
+    const cartao = screen.getByTestId('rc18-grupo-confiabilidade');
+    expect(within(cartao).getByText('50%')).toBeInTheDocument();
+    expect(within(cartao).getByText('1 de 2 regras aprovadas')).toBeInTheDocument();
+
     expect(screen.getByText('fin_demo_cartoes.transacao_cartao')).toBeInTheDocument();
     // Scan configurado e ainda não executado: sem percentual e sem selo de aprovação.
     const linhaSemExecucao = screen.getByText('fin_demo_credito.operacoes_ativas').closest('tr') as HTMLElement;
     expect(within(linhaSemExecucao).getByText('Sem execução')).toBeInTheDocument();
     expect(within(linhaSemExecucao).queryByText(/%/)).toBeNull();
+    const linhaContas = screen.getByText('fin_demo_contas.saldos_extratos').closest('tr') as HTMLElement;
+    expect(within(linhaContas).getByText('VII 50%')).toBeInTheDocument();
+    expect(within(linhaContas).getByText('IX 100%')).toBeInTheDocument();
     semTermosVedados();
-    for (const aba of [/Acurácia \(II\)/, /Completude \(VI\)/, /Consistência \(VIII\)/]) {
-      abrirAba(aba);
-      expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
-      semTermosVedados();
-    }
+
+    // Todas as regras, com a dimensão da Resolução, a descrição e o resultado de cada forma de regra.
+    abrirAba(/^Regras \(16\)$/);
+    expect(screen.getByTestId('rc18-regras-contagem')).toHaveTextContent('16 de 16 regras');
+    fireEvent.click(within(cartao).getByRole('button', { name: 'Ver regras de Confiabilidade' }));
+    expect(screen.getByTestId('rc18-regras-contagem')).toHaveTextContent('2 de 16 regras');
+    const regras = screen.getByTitle('Regras de qualidade');
+    const revisao = within(regras).getByText('revisao-sem-desvio-relevante').closest('tr') as HTMLElement;
+    expect(within(revisao).getByText(/Nenhum saldo revisado se afasta mais de 5% do valor informado/)).toBeInTheDocument();
+    expect(within(revisao).getByText('VII — Confiabilidade')).toBeInTheDocument();
+    expect(within(revisao).getByText('3 linhas em desacordo')).toBeInTheDocument();
+    expect(within(revisao).getByText('Reprovada')).toBeInTheDocument();
+    const total = within(regras).getByText('total-revisado-proximo-do-informado').closest('tr') as HTMLElement;
+    expect(within(total).getByText('Condição atendida')).toBeInTheDocument();
+    expect(within(total).getByText('Aprovada')).toBeInTheDocument();
+    expect(within(regras).queryByText('cpf-formato')).toBeNull();
+    semTermosVedados();
+
+    // Regra por linha: linhas aprovadas e avaliadas, como devolvidas pela API.
+    fireEvent.click(within(screen.getByTestId('rc18-grupo-acuracia')).getByRole('button', { name: 'Ver regras de Acurácia' }));
+    const email = within(screen.getByTitle('Regras de qualidade')).getByText('email-formato').closest('tr') as HTMLElement;
+    expect(within(email).getByText('47.850 de 48.920 linhas (97,81%)')).toBeInTheDocument();
+    const semExecucao = within(screen.getByTitle('Regras de qualidade')).getByText('taxa-em-intervalo').closest('tr') as HTMLElement;
+    expect(within(semExecucao).getByText('Sem execução')).toBeInTheDocument();
+    expect(within(semExecucao).queryByText(/%/)).toBeNull();
+    semTermosVedados();
+  });
+
+  it('do cartão da dimensão para as regras: abre a lista já filtrada', async () => {
+    await abrirPainel(respostas.demo);
+    const integridade = screen.getByTestId('rc18-dimensao-integridade');
+    fireEvent.click(within(integridade).getByRole('button', { name: 'Ver as 1 regra(s) desta dimensão' }));
+    expect(screen.getByTestId('rc18-regras-contagem')).toHaveTextContent('1 de 16 regras');
+    const regras = screen.getByTitle('Regras de qualidade');
+    expect(within(regras).getByText('hash-de-carga-confere')).toBeInTheDocument();
+    expect(within(regras).getByText('IX — Integridade')).toBeInTheDocument();
+    // Dimensão sem regras não oferece o atalho.
+    abrirVisao(/12 dimensões/);
+    expect(within(screen.getByTestId('rc18-dimensao-adaptabilidade')).queryByRole('button', { name: /Ver as/ })).toBeNull();
   });
 
   it('visão "Dados sensíveis": complementar, factual e sem classificação de risco', async () => {
@@ -158,8 +227,13 @@ describe('RC18Dashboard', () => {
     await abrirPainel(respostas.demo);
     abrirVisao(/Knowledge Catalog \(contexto\)/);
     expect(screen.getByText('4 de 4')).toBeInTheDocument();
-    const linhaSemUso = within(screen.getByTitle('Entradas do Knowledge Catalog')).getByText('saldos_extratos').closest('tr') as HTMLElement;
+    const entradas = screen.getByTitle('Entradas do Knowledge Catalog');
+    const linhaSemUso = within(entradas).getByText('saldos_extratos').closest('tr') as HTMLElement;
     expect(within(linhaSemUso).getByText('não informado')).toBeInTheDocument();
+    // Termos de glossário vinculados à tabela ou às suas colunas (indicador de comparabilidade).
+    expect(within(linhaSemUso).getByText('saldo-disponivel')).toBeInTheDocument();
+    const linhaCadastro = within(entradas).getByText('dados_cadastrais').closest('tr') as HTMLElement;
+    expect(within(linhaCadastro).getByText('cliente, cpf')).toBeInTheDocument();
     semTermosVedados();
   });
 
@@ -175,8 +249,9 @@ describe('RC18Dashboard', () => {
 
     abrirVisao('Qualidade por tabela');
     expect(screen.getByText(/Nenhum DataScan de qualidade de dados encontrado para este projeto/)).toBeInTheDocument();
-    // Sem execução: selo neutro, nunca o de aprovação.
-    expect(screen.getAllByTestId('RemoveCircleOutlineIcon')).toHaveLength(3);
+    // Sem regras: nenhum cartão de dimensão, nenhuma tabela e nenhum selo de aprovação.
+    expect(screen.queryByTestId(/^rc18-grupo-/)).toBeNull();
+    expect(screen.queryByRole('table')).toBeNull();
     expect(screen.queryByTestId('CheckCircleIcon')).toBeNull();
 
     abrirVisao(/Dados sensíveis/);
@@ -259,6 +334,7 @@ describe('RC18Dashboard', () => {
     expect(exportado.dimensoes.dimensoes).toHaveLength(12);
     expect(exportado.aviso).toMatch(/não atesta conformidade regulatória/);
     expect(exportado.qualidadePorTabela.tableSummaries.length).toBeGreaterThan(0);
+    expect(exportado.qualidadePorTabela.dimensionGroups).toHaveLength(7);
     expect('lookupContextYaml' in exportado.qualidadePorTabela).toBe(false);
     expect(texto).not.toContain('valor-de-exemplo-do-dado');
     click.mockRestore();

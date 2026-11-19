@@ -12,16 +12,24 @@
  * aceitos aqui devem vir de `GetDataScan(view=FULL)`.
  */
 
+/**
+ * Tipos de regra do Dataplex: [campo da API, rótulo, forma do resultado].
+ *   'linhas'   -> regra por linha: a API devolve linhas avaliadas e linhas aprovadas;
+ *   'agregada' -> condição sobre a tabela inteira: a API devolve só aprovada/reprovada;
+ *   'assercao' -> consulta que lista o que está em desacordo: a API devolve a quantidade de
+ *                 linhas retornadas (`assertionRowCount`); zero linhas = aprovada.
+ */
 const RULE_TYPES = [
-  ['nonNullExpectation', 'Não nulo'],
-  ['uniquenessExpectation', 'Unicidade'],
-  ['rangeExpectation', 'Intervalo'],
-  ['regexExpectation', 'Expressão regular'],
-  ['setExpectation', 'Conjunto de valores'],
-  ['statisticRangeExpectation', 'Estatística em intervalo'],
-  ['rowConditionExpectation', 'Condição por linha (SQL)'],
-  ['tableConditionExpectation', 'Condição agregada (SQL)'],
-  ['sqlAssertion', 'Asserção SQL'],
+  ['nonNullExpectation', 'Não nulo', 'linhas'],
+  ['uniquenessExpectation', 'Unicidade', 'linhas'],
+  ['rangeExpectation', 'Intervalo', 'linhas'],
+  ['regexExpectation', 'Expressão regular', 'linhas'],
+  ['setExpectation', 'Conjunto de valores', 'linhas'],
+  ['statisticRangeExpectation', 'Estatística em intervalo', 'agregada'],
+  ['rowConditionExpectation', 'Condição por linha (SQL)', 'linhas'],
+  ['tableConditionExpectation', 'Condição agregada (SQL)', 'agregada'],
+  ['sqlAssertion', 'Asserção SQL', 'assercao'],
+  ['templateReference', 'Modelo de regra', 'assercao'],
 ];
 
 function round2(n) {
@@ -73,6 +81,7 @@ function describeRule(rule) {
     ruleDescription: r.description || null,
     column: r.column || null,
     ruleType: typeEntry ? typeEntry[1] : 'Regra',
+    resultKind: typeEntry ? typeEntry[2] : null,
     dqDimension: dqDimension || null,
   };
 }
@@ -104,15 +113,37 @@ function rulesFromScan(scan) {
     return resultRules.map((item) => {
       const passRatio =
         item.passRatio === undefined || item.passRatio === null ? null : Number(item.passRatio);
+      const described = describeRule(item.rule);
+      // Em proto3 `passed: false` é omitido da resposta: ausência significa reprovada.
+      const passed = item.passed === true;
+      let evaluatedCount = toNumberOrNull(item.evaluatedCount);
+      let passedCount = toNumberOrNull(item.passedCount);
+      let ratio = Number.isFinite(passRatio) ? passRatio : null;
+      let assertionRowCount = toNumberOrNull(item.assertionRowCount);
+      // Cada forma de regra só tem os contadores que lhe cabem. A resposta REST omite os demais;
+      // a gRPC os devolve zerados — e um zero desses não é uma medição.
+      if (described.resultKind === 'assercao') {
+        evaluatedCount = null;
+        passedCount = null;
+        ratio = null;
+        // Zero linhas em desacordo também é omitido na resposta REST: asserção aprovada = 0.
+        if (assertionRowCount === null && passed) assertionRowCount = 0;
+      } else if (described.resultKind === 'agregada') {
+        passedCount = null;
+        ratio = null;
+        assertionRowCount = null;
+      } else if (described.resultKind === 'linhas') {
+        assertionRowCount = null;
+      }
       return {
         ...base,
-        ...describeRule(item.rule),
+        ...described,
         executed: true,
-        // Em proto3 `passed: false` é omitido da resposta: ausência significa reprovada.
-        passed: item.passed === true,
-        evaluatedCount: toNumberOrNull(item.evaluatedCount),
-        passedCount: toNumberOrNull(item.passedCount),
-        passRatio: Number.isFinite(passRatio) ? passRatio : null,
+        passed,
+        evaluatedCount,
+        passedCount,
+        passRatio: ratio,
+        assertionRowCount,
         failingRowsQuery: item.failingRowsQuery || null,
         executionTime,
       };
@@ -129,6 +160,7 @@ function rulesFromScan(scan) {
       evaluatedCount: null,
       passedCount: null,
       passRatio: null,
+      assertionRowCount: null,
       failingRowsQuery: null,
       executionTime: null,
     }));

@@ -67,6 +67,16 @@
           "comoEMedido": "Percentual de tabelas do escopo com contatos registrados no Knowledge Catalog (aspecto contacts).",
           "lacuna": "Cobre apenas a indicação, no catálogo de dados, de a quem dirigir demandas sobre a informação. O local de disponibilização ao usuário, os prazos e o tratamento especial às pessoas com deficiência precisam ser evidenciados pela instituição.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Knowledge Catalog — aspecto contacts",
+              "acao": "Registrar, na entrada de cada tabela, quem atende demandas sobre a informação."
+            },
+            {
+              "recurso": "Knowledge Catalog — aspecto overview",
+              "acao": "Documentar onde a informação fica disponível, como pedir acesso e os prazos."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -104,7 +114,18 @@
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY).",
           "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos (art. 3º, V, \"a\").",
           "porRegrasPersonalizadas": false,
-          "evidencias": []
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (ACCURACY, VALIDITY)",
+              "acao": "Validar formato, faixa e domínio dos campos; reconciliar com o sistema de origem por meio de regra SQL que consulta a tabela de origem."
+            }
+          ],
+          "evidencias": [
+            {
+              "rotulo": "Regras: execução mais recente",
+              "valor": "2026-01-15T08:03:36.000Z"
+            }
+          ]
         },
         {
           "id": "adaptabilidade",
@@ -126,8 +147,18 @@
           ],
           "fontes": [],
           "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão. É um atributo de arquitetura e de processo, a ser evidenciado pela instituição.",
+          "lacuna": "Não há regras marcadas com a dimensão ADAPTABILIDADE no escopo. É um atributo de arquitetura e de processo: o painel só mostra o resultado dos testes de geração fora da rotina que a instituição registrar.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "BigQuery — tabela de controle",
+              "acao": "Registrar cada teste de geração da informação fora da rotina (demanda não periódica, mudança regulamentar, contingência), com início, entrega, prazo e resultado."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (ADAPTABILIDADE)",
+              "acao": "Asserções SQL que verificam se há teste bem-sucedido de cada cenário dentro da janela definida pela instituição."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -164,6 +195,16 @@
           "comoEMedido": "Percentual de colunas com descrição nas tabelas do escopo.",
           "lacuna": "Cobre apenas a documentação técnica (dicionário de dados — art. 3º, III, \"c\"). A clareza da informação entregue ao usuário não é avaliada.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "BigQuery — descrições",
+              "acao": "Descrever tabelas e colunas (dicionário de dados)."
+            },
+            {
+              "recurso": "Knowledge Catalog — aspecto overview",
+              "acao": "Documentar o conteúdo e o uso da informação na entrada da tabela."
+            }
+          ],
           "evidencias": [
             {
               "rotulo": "Tabelas com descrição",
@@ -180,24 +221,62 @@
           "inciso": "V",
           "nome": "Comparabilidade",
           "definicao": "capacidade de possibilitar ao usuário identificar e compreender semelhanças e diferenças entre informações, seja em diferentes períodos ou entre diferentes áreas geográficas ou domínios não geográficos",
-          "coleta": "declaratoria",
-          "estado": "nao_medido",
-          "indicadores": [],
+          "coleta": "parcial",
+          "estado": "medido",
+          "indicadores": [
+            {
+              "id": "regras_dq",
+              "rotulo": "Regras de qualidade aprovadas (última execução dos DataScans)",
+              "valorPct": 100,
+              "numerador": 1,
+              "denominador": 1,
+              "unidade": "regras"
+            },
+            {
+              "id": "tabelas_com_termo_de_glossario",
+              "rotulo": "Tabelas do escopo com termo de glossário vinculado (Knowledge Catalog)",
+              "valorPct": 50,
+              "numerador": 2,
+              "denominador": 4,
+              "unidade": "tabelas"
+            }
+          ],
           "regras": {
-            "total": 0,
-            "executadas": 0,
-            "aprovadas": 0,
+            "total": 1,
+            "executadas": 1,
+            "aprovadas": 1,
             "reprovadas": 0,
             "naoExecutadas": 0
           },
           "dqDimensions": [
             "COMPARABILIDADE"
           ],
-          "fontes": [],
-          "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão.",
+          "fontes": [
+            "Knowledge Catalog (termos de glossário vinculados)"
+          ],
+          "comoEMedido": "Percentual de tabelas do escopo com termo de glossário vinculado à tabela ou a uma de suas colunas (Knowledge Catalog).",
+          "lacuna": "A definição padronizada ajuda a comparar informações, mas não comprova que valores de períodos, regiões ou domínios diferentes são comparáveis: isso depende de regras de padronização marcadas com a dimensão COMPARABILIDADE.",
           "porRegrasPersonalizadas": false,
-          "evidencias": []
+          "medicao": [
+            {
+              "recurso": "Knowledge Catalog — glossário de negócios",
+              "acao": "Vincular tabelas e colunas a termos com definição padronizada."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (COMPARABILIDADE)",
+              "acao": "Verificar domínios padronizados contra tabelas de referência, série sem lacunas entre períodos e unidade ou moeda única."
+            }
+          ],
+          "evidencias": [
+            {
+              "rotulo": "Regras: execução mais recente",
+              "valor": "2026-01-15T08:03:36.000Z"
+            },
+            {
+              "rotulo": "Termos de glossário distintos vinculados",
+              "valor": "3"
+            }
+          ]
         },
         {
           "id": "completude",
@@ -234,7 +313,18 @@
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões COMPLETENESS e VOLUME).",
           "lacuna": "Mede apenas os campos e as tabelas com regras configuradas; não verifica se todos os aspectos requeridos pelo demandante foram atendidos.",
           "porRegrasPersonalizadas": false,
-          "evidencias": []
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (COMPLETENESS, VOLUME)",
+              "acao": "Verificar campos obrigatórios preenchidos e volume esperado de registros."
+            }
+          ],
+          "evidencias": [
+            {
+              "rotulo": "Regras: execução mais recente",
+              "valor": "2026-01-15T08:03:36.000Z"
+            }
+          ]
         },
         {
           "id": "confiabilidade",
@@ -242,23 +332,47 @@
           "nome": "Confiabilidade",
           "definicao": "ausência de desvio relevante nos dados revisados em relação ao seu valor inicial",
           "coleta": "declaratoria",
-          "estado": "nao_medido",
-          "indicadores": [],
+          "estado": "medido",
+          "indicadores": [
+            {
+              "id": "regras_dq",
+              "rotulo": "Regras de qualidade aprovadas (última execução dos DataScans)",
+              "valorPct": 50,
+              "numerador": 1,
+              "denominador": 2,
+              "unidade": "regras"
+            }
+          ],
           "regras": {
-            "total": 0,
-            "executadas": 0,
-            "aprovadas": 0,
-            "reprovadas": 0,
+            "total": 2,
+            "executadas": 2,
+            "aprovadas": 1,
+            "reprovadas": 1,
             "naoExecutadas": 0
           },
           "dqDimensions": [
             "CONFIABILIDADE"
           ],
           "fontes": [],
-          "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão. A definição trata de revisões: exige comparar o dado revisado com o valor inicialmente prestado.",
-          "porRegrasPersonalizadas": false,
-          "evidencias": []
+          "comoEMedido": "Percentual de regras aprovadas entre as regras de DataScan marcadas com a dimensão personalizada.",
+          "lacuna": "Reflete apenas as regras que a instituição marcou com esta dimensão personalizada; se elas bastam para evidenciar a dimensão é avaliação da instituição.",
+          "porRegrasPersonalizadas": true,
+          "medicao": [
+            {
+              "recurso": "BigQuery — snapshot de tabela",
+              "acao": "Guardar a versão informada no momento da remessa (cópia somente leitura)."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (CONFIABILIDADE)",
+              "acao": "Comparar a versão revisada com o snapshot e apontar desvios acima do limite definido pela instituição."
+            }
+          ],
+          "evidencias": [
+            {
+              "rotulo": "Regras: execução mais recente",
+              "valor": "2026-01-15T08:03:36.000Z"
+            }
+          ]
         },
         {
           "id": "consistencia",
@@ -295,7 +409,18 @@
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões CONSISTENCY e UNIQUENESS).",
           "lacuna": "A consistência entre fontes distintas depende de regras de reconciliação definidas pela instituição.",
           "porRegrasPersonalizadas": false,
-          "evidencias": []
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (CONSISTENCY, UNIQUENESS)",
+              "acao": "Verificar chaves sem duplicidade e reconciliar a mesma informação entre fontes por meio de regra SQL."
+            }
+          ],
+          "evidencias": [
+            {
+              "rotulo": "Regras: execução mais recente",
+              "valor": "2026-01-15T08:03:36.000Z"
+            }
+          ]
         },
         {
           "id": "integridade",
@@ -328,7 +453,22 @@
           "comoEMedido": "Percentual de regras aprovadas entre as regras de DataScan marcadas com a dimensão personalizada.",
           "lacuna": "Reflete apenas as regras que a instituição marcou com esta dimensão personalizada; se elas bastam para evidenciar a dimensão é avaliação da instituição.",
           "porRegrasPersonalizadas": true,
-          "evidencias": []
+          "medicao": [
+            {
+              "recurso": "BigQuery — hash por registro",
+              "acao": "Gravar na carga um hash do conteúdo de cada registro."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (INTEGRIDADE)",
+              "acao": "Conferir o conteúdo com o hash e exigir revisão registrada para toda diferença em relação à versão informada."
+            }
+          ],
+          "evidencias": [
+            {
+              "rotulo": "Regras: execução mais recente",
+              "valor": "2026-01-15T08:03:36.000Z"
+            }
+          ]
         },
         {
           "id": "rastreabilidade",
@@ -363,6 +503,12 @@
           "comoEMedido": "Percentual de tabelas do escopo com origem registrada na Data Lineage API.",
           "lacuna": "Cobre apenas as transformações registradas no Google Cloud. Os trechos fora da plataforma (sistemas de origem e entrega ao usuário final) precisam ser documentados pela instituição.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Data Lineage API",
+              "acao": "Manter a API ativada: os jobs do BigQuery que gravam a tabela registram a origem. Etapas fora do Google Cloud podem ser registradas pela mesma API."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -398,6 +544,12 @@
           "comoEMedido": "Percentual de tabelas do escopo com consultas registradas nos últimos 30 dias (aspecto usage do Knowledge Catalog).",
           "lacuna": "O uso técnico da tabela não comprova que a informação é útil para a tomada de decisões pelos usuários; a contagem de consultas é a informada pelo catálogo e pode incluir consultas automatizadas.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Knowledge Catalog — aspecto usage",
+              "acao": "Preenchido pelo próprio catálogo com as consultas feitas às tabelas do BigQuery."
+            }
+          ],
           "evidencias": [
             {
               "rotulo": "Tabelas sem métrica de uso informada pelo catálogo",
@@ -441,7 +593,17 @@
           "comoEMedido": "Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A data da última modificação das tabelas é exibida apenas como informação.",
           "lacuna": "O cumprimento dos prazos de remessa ao Banco Central do Brasil não é observável nesta plataforma.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (FRESHNESS)",
+              "acao": "Verificar se a carga mais recente está dentro do prazo e se o intervalo entre a data do fato e a disponibilização respeita o limite definido pela instituição."
+            }
+          ],
           "evidencias": [
+            {
+              "rotulo": "Regras: execução mais recente",
+              "valor": "2026-01-15T08:03:36.000Z"
+            },
             {
               "rotulo": "Última modificação — fin_demo_cadastro.dados_cadastrais",
               "valor": "2026-01-15T08:03:36.000Z"
@@ -462,9 +624,9 @@
         }
       ],
       "resumo": {
-        "medidas": 9,
+        "medidas": 11,
         "semDados": 0,
-        "naoMedidas": 3
+        "naoMedidas": 1
       },
       "regrasSemMapeamento": [],
       "diagnostics": []
@@ -492,234 +654,507 @@
         "limiteScans": 50,
         "limiteTabelas": 50
       },
-      "dimensions": {
-        "accuracy": {
-          "name": "Acurácia",
+      "dimensionGroups": [
+        {
+          "id": "acuracia",
           "inciso": "II",
+          "name": "Acurácia",
           "group": "art. 2º, § 2º, II",
+          "dqDimensions": [
+            "ACCURACY",
+            "VALIDITY"
+          ],
           "scorePct": 66.67,
           "rulesEvaluated": 3,
           "rulesPassed": 2,
+          "rulesFailed": 1,
           "rulesNotExecuted": 1,
           "rules": [
             {
               "ruleName": "cpf-formato",
+              "description": null,
               "column": "cpf",
               "table": "dados_cadastrais",
               "dataset": "fin_demo_cadastro",
+              "tableKey": "fin_demo_cadastro.dados_cadastrais",
               "scanId": "dq-exemplo-cadastro",
               "executed": true,
               "passed": true,
+              "resultKind": "linhas",
               "evaluatedCount": 48920,
               "passedCount": 48920,
               "failedCount": 0,
               "passPercentage": 100,
+              "assertionRowCount": null,
               "dimension": "VALIDITY",
+              "dimensionId": "acuracia",
+              "dimensionName": "Acurácia",
+              "inciso": "II",
               "ruleType": "Expressão regular",
               "failedRecordsQuery": "",
               "executionTime": "2026-01-15T08:03:36.000Z"
             },
             {
               "ruleName": "email-formato",
+              "description": null,
               "column": "email",
               "table": "dados_cadastrais",
               "dataset": "fin_demo_cadastro",
+              "tableKey": "fin_demo_cadastro.dados_cadastrais",
               "scanId": "dq-exemplo-cadastro",
               "executed": true,
               "passed": false,
+              "resultKind": "linhas",
               "evaluatedCount": 48920,
               "passedCount": 47850,
               "failedCount": 1070,
               "passPercentage": 97.81,
+              "assertionRowCount": null,
               "dimension": "VALIDITY",
+              "dimensionId": "acuracia",
+              "dimensionName": "Acurácia",
+              "inciso": "II",
               "ruleType": "Expressão regular",
               "failedRecordsQuery": "SELECT * FROM tabela_exemplo WHERE /* regra email-formato */ FALSE",
               "executionTime": "2026-01-15T08:03:36.000Z"
             },
             {
               "ruleName": "valor-positivo",
+              "description": null,
               "column": "valor_transacao",
               "table": "transacao_cartao",
               "dataset": "fin_demo_cartoes",
+              "tableKey": "fin_demo_cartoes.transacao_cartao",
               "scanId": "dq-exemplo-cartoes",
               "executed": true,
               "passed": true,
+              "resultKind": "linhas",
               "evaluatedCount": 128500,
               "passedCount": 128500,
               "failedCount": 0,
               "passPercentage": 100,
+              "assertionRowCount": null,
               "dimension": "ACCURACY",
+              "dimensionId": "acuracia",
+              "dimensionName": "Acurácia",
+              "inciso": "II",
               "ruleType": "Intervalo",
               "failedRecordsQuery": "",
               "executionTime": "2026-01-15T08:03:36.000Z"
             },
             {
               "ruleName": "taxa-em-intervalo",
+              "description": null,
               "column": "taxa_juros_anual",
               "table": "operacoes_ativas",
               "dataset": "fin_demo_credito",
+              "tableKey": "fin_demo_credito.operacoes_ativas",
               "scanId": "dq-exemplo-credito",
               "executed": false,
               "passed": null,
+              "resultKind": "linhas",
               "evaluatedCount": null,
               "passedCount": null,
               "failedCount": null,
               "passPercentage": null,
+              "assertionRowCount": null,
               "dimension": "ACCURACY",
+              "dimensionId": "acuracia",
+              "dimensionName": "Acurácia",
+              "inciso": "II",
               "ruleType": "Intervalo",
               "failedRecordsQuery": "",
               "executionTime": null
             }
-          ],
-          "productGcp": "Dataplex DataScan",
-          "description": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY)."
+          ]
         },
-        "completeness": {
-          "name": "Completude",
+        {
+          "id": "comparabilidade",
+          "inciso": "V",
+          "name": "Comparabilidade",
+          "group": "art. 2º, § 2º, V",
+          "dqDimensions": [
+            "COMPARABILIDADE"
+          ],
+          "scorePct": 100,
+          "rulesEvaluated": 1,
+          "rulesPassed": 1,
+          "rulesFailed": 0,
+          "rulesNotExecuted": 0,
+          "rules": [
+            {
+              "ruleName": "moeda-unica-por-data-base",
+              "description": "Cada data-base usa uma única moeda.",
+              "column": "—",
+              "table": "saldos_extratos",
+              "dataset": "fin_demo_contas",
+              "tableKey": "fin_demo_contas.saldos_extratos",
+              "scanId": "dq-exemplo-contas",
+              "executed": true,
+              "passed": true,
+              "resultKind": "assercao",
+              "evaluatedCount": null,
+              "passedCount": null,
+              "failedCount": null,
+              "passPercentage": null,
+              "assertionRowCount": 0,
+              "dimension": "COMPARABILIDADE",
+              "dimensionId": "comparabilidade",
+              "dimensionName": "Comparabilidade",
+              "inciso": "V",
+              "ruleType": "Asserção SQL",
+              "failedRecordsQuery": "",
+              "executionTime": "2026-01-15T08:03:36.000Z"
+            }
+          ]
+        },
+        {
+          "id": "completude",
           "inciso": "VI",
+          "name": "Completude",
           "group": "art. 2º, § 2º, VI",
+          "dqDimensions": [
+            "COMPLETENESS"
+          ],
           "scorePct": 100,
           "rulesEvaluated": 3,
           "rulesPassed": 3,
+          "rulesFailed": 0,
           "rulesNotExecuted": 1,
           "rules": [
             {
               "ruleName": "cpf-nao-nulo",
+              "description": null,
               "column": "cpf",
               "table": "dados_cadastrais",
               "dataset": "fin_demo_cadastro",
+              "tableKey": "fin_demo_cadastro.dados_cadastrais",
               "scanId": "dq-exemplo-cadastro",
               "executed": true,
               "passed": true,
+              "resultKind": "linhas",
               "evaluatedCount": 48920,
               "passedCount": 48920,
               "failedCount": 0,
               "passPercentage": 100,
+              "assertionRowCount": null,
               "dimension": "COMPLETENESS",
+              "dimensionId": "completude",
+              "dimensionName": "Completude",
+              "inciso": "VI",
               "ruleType": "Não nulo",
               "failedRecordsQuery": "",
               "executionTime": "2026-01-15T08:03:36.000Z"
             },
             {
               "ruleName": "nome-nao-nulo",
+              "description": null,
               "column": "nome_completo",
               "table": "dados_cadastrais",
               "dataset": "fin_demo_cadastro",
+              "tableKey": "fin_demo_cadastro.dados_cadastrais",
               "scanId": "dq-exemplo-cadastro",
               "executed": true,
               "passed": true,
+              "resultKind": "linhas",
               "evaluatedCount": 48920,
               "passedCount": 48920,
               "failedCount": 0,
               "passPercentage": 100,
+              "assertionRowCount": null,
               "dimension": "COMPLETENESS",
+              "dimensionId": "completude",
+              "dimensionName": "Completude",
+              "inciso": "VI",
               "ruleType": "Não nulo",
               "failedRecordsQuery": "",
               "executionTime": "2026-01-15T08:03:36.000Z"
             },
             {
               "ruleName": "data-hora-nao-nula",
+              "description": null,
               "column": "data_hora_transacao",
               "table": "transacao_cartao",
               "dataset": "fin_demo_cartoes",
+              "tableKey": "fin_demo_cartoes.transacao_cartao",
               "scanId": "dq-exemplo-cartoes",
               "executed": true,
               "passed": true,
+              "resultKind": "linhas",
               "evaluatedCount": 128500,
               "passedCount": 128500,
               "failedCount": 0,
               "passPercentage": 100,
+              "assertionRowCount": null,
               "dimension": "COMPLETENESS",
+              "dimensionId": "completude",
+              "dimensionName": "Completude",
+              "inciso": "VI",
               "ruleType": "Não nulo",
               "failedRecordsQuery": "",
               "executionTime": "2026-01-15T08:03:36.000Z"
             },
             {
               "ruleName": "cnpj-nao-nulo",
+              "description": null,
               "column": "cnpj_empresa",
               "table": "operacoes_ativas",
               "dataset": "fin_demo_credito",
+              "tableKey": "fin_demo_credito.operacoes_ativas",
               "scanId": "dq-exemplo-credito",
               "executed": false,
               "passed": null,
+              "resultKind": "linhas",
               "evaluatedCount": null,
               "passedCount": null,
               "failedCount": null,
               "passPercentage": null,
+              "assertionRowCount": null,
               "dimension": "COMPLETENESS",
+              "dimensionId": "completude",
+              "dimensionName": "Completude",
+              "inciso": "VI",
               "ruleType": "Não nulo",
               "failedRecordsQuery": "",
               "executionTime": null
             }
-          ],
-          "productGcp": "Dataplex DataScan",
-          "description": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões COMPLETENESS e VOLUME)."
+          ]
         },
-        "consistency": {
-          "name": "Consistência",
+        {
+          "id": "confiabilidade",
+          "inciso": "VII",
+          "name": "Confiabilidade",
+          "group": "art. 2º, § 2º, VII",
+          "dqDimensions": [
+            "CONFIABILIDADE"
+          ],
+          "scorePct": 50,
+          "rulesEvaluated": 2,
+          "rulesPassed": 1,
+          "rulesFailed": 1,
+          "rulesNotExecuted": 0,
+          "rules": [
+            {
+              "ruleName": "revisao-sem-desvio-relevante",
+              "description": "Nenhum saldo revisado se afasta mais de 5% do valor informado (comparação com o snapshot da remessa).",
+              "column": "—",
+              "table": "saldos_extratos",
+              "dataset": "fin_demo_contas",
+              "tableKey": "fin_demo_contas.saldos_extratos",
+              "scanId": "dq-exemplo-contas",
+              "executed": true,
+              "passed": false,
+              "resultKind": "assercao",
+              "evaluatedCount": null,
+              "passedCount": null,
+              "failedCount": null,
+              "passPercentage": null,
+              "assertionRowCount": 3,
+              "dimension": "CONFIABILIDADE",
+              "dimensionId": "confiabilidade",
+              "dimensionName": "Confiabilidade",
+              "inciso": "VII",
+              "ruleType": "Asserção SQL",
+              "failedRecordsQuery": "SELECT * FROM tabela_exemplo WHERE /* regra revisao-sem-desvio-relevante */ FALSE",
+              "executionTime": "2026-01-15T08:03:36.000Z"
+            },
+            {
+              "ruleName": "total-revisado-proximo-do-informado",
+              "description": "O saldo total revisado difere no máximo 1% do total informado.",
+              "column": "—",
+              "table": "saldos_extratos",
+              "dataset": "fin_demo_contas",
+              "tableKey": "fin_demo_contas.saldos_extratos",
+              "scanId": "dq-exemplo-contas",
+              "executed": true,
+              "passed": true,
+              "resultKind": "agregada",
+              "evaluatedCount": null,
+              "passedCount": null,
+              "failedCount": null,
+              "passPercentage": null,
+              "assertionRowCount": null,
+              "dimension": "CONFIABILIDADE",
+              "dimensionId": "confiabilidade",
+              "dimensionName": "Confiabilidade",
+              "inciso": "VII",
+              "ruleType": "Condição agregada (SQL)",
+              "failedRecordsQuery": "",
+              "executionTime": "2026-01-15T08:03:36.000Z"
+            }
+          ]
+        },
+        {
+          "id": "consistencia",
           "inciso": "VIII",
+          "name": "Consistência",
           "group": "art. 2º, § 2º, VIII",
+          "dqDimensions": [
+            "CONSISTENCY",
+            "UNIQUENESS"
+          ],
           "scorePct": 66.67,
           "rulesEvaluated": 3,
           "rulesPassed": 2,
+          "rulesFailed": 1,
           "rulesNotExecuted": 0,
           "rules": [
             {
               "ruleName": "id-unico",
+              "description": null,
               "column": "id_cliente",
               "table": "dados_cadastrais",
               "dataset": "fin_demo_cadastro",
+              "tableKey": "fin_demo_cadastro.dados_cadastrais",
               "scanId": "dq-exemplo-cadastro",
               "executed": true,
               "passed": true,
+              "resultKind": "linhas",
               "evaluatedCount": 48920,
               "passedCount": 48920,
               "failedCount": 0,
               "passPercentage": 100,
+              "assertionRowCount": null,
               "dimension": "UNIQUENESS",
+              "dimensionId": "consistencia",
+              "dimensionName": "Consistência",
+              "inciso": "VIII",
               "ruleType": "Unicidade",
               "failedRecordsQuery": "",
               "executionTime": "2026-01-15T08:03:36.000Z"
             },
             {
               "ruleName": "nsu-unico",
+              "description": null,
               "column": "nsu_transacao",
               "table": "transacao_cartao",
               "dataset": "fin_demo_cartoes",
+              "tableKey": "fin_demo_cartoes.transacao_cartao",
               "scanId": "dq-exemplo-cartoes",
               "executed": true,
               "passed": false,
+              "resultKind": "linhas",
               "evaluatedCount": 128500,
               "passedCount": 128430,
               "failedCount": 70,
               "passPercentage": 99.95,
+              "assertionRowCount": null,
               "dimension": "UNIQUENESS",
+              "dimensionId": "consistencia",
+              "dimensionName": "Consistência",
+              "inciso": "VIII",
               "ruleType": "Unicidade",
               "failedRecordsQuery": "SELECT * FROM tabela_exemplo WHERE /* regra nsu-unico */ FALSE",
               "executionTime": "2026-01-15T08:03:36.000Z"
             },
             {
               "ruleName": "saldo-confere-lancamentos",
+              "description": null,
               "column": "saldo_disponivel",
               "table": "saldos_extratos",
               "dataset": "fin_demo_contas",
+              "tableKey": "fin_demo_contas.saldos_extratos",
               "scanId": "dq-exemplo-contas",
               "executed": true,
               "passed": true,
+              "resultKind": "linhas",
               "evaluatedCount": 94300,
               "passedCount": 94300,
               "failedCount": 0,
               "passPercentage": 100,
+              "assertionRowCount": null,
               "dimension": "CONSISTENCY",
+              "dimensionId": "consistencia",
+              "dimensionName": "Consistência",
+              "inciso": "VIII",
               "ruleType": "Condição por linha (SQL)",
               "failedRecordsQuery": "",
               "executionTime": "2026-01-15T08:03:36.000Z"
             }
+          ]
+        },
+        {
+          "id": "integridade",
+          "inciso": "IX",
+          "name": "Integridade",
+          "group": "art. 2º, § 2º, IX",
+          "dqDimensions": [
+            "INTEGRIDADE"
           ],
-          "productGcp": "Dataplex DataScan",
-          "description": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões CONSISTENCY e UNIQUENESS)."
+          "scorePct": 100,
+          "rulesEvaluated": 1,
+          "rulesPassed": 1,
+          "rulesFailed": 0,
+          "rulesNotExecuted": 0,
+          "rules": [
+            {
+              "ruleName": "hash-de-carga-confere",
+              "description": "O hash do lote carregado confere com o hash calculado na origem.",
+              "column": "—",
+              "table": "saldos_extratos",
+              "dataset": "fin_demo_contas",
+              "tableKey": "fin_demo_contas.saldos_extratos",
+              "scanId": "dq-exemplo-contas",
+              "executed": true,
+              "passed": true,
+              "resultKind": "agregada",
+              "evaluatedCount": null,
+              "passedCount": null,
+              "failedCount": null,
+              "passPercentage": null,
+              "assertionRowCount": null,
+              "dimension": "INTEGRIDADE",
+              "dimensionId": "integridade",
+              "dimensionName": "Integridade",
+              "inciso": "IX",
+              "ruleType": "Condição agregada (SQL)",
+              "failedRecordsQuery": "",
+              "executionTime": "2026-01-15T08:03:36.000Z"
+            }
+          ]
+        },
+        {
+          "id": "tempestividade",
+          "inciso": "XII",
+          "name": "Tempestividade",
+          "group": "art. 2º, § 2º, XII",
+          "dqDimensions": [
+            "FRESHNESS"
+          ],
+          "scorePct": 100,
+          "rulesEvaluated": 1,
+          "rulesPassed": 1,
+          "rulesFailed": 0,
+          "rulesNotExecuted": 0,
+          "rules": [
+            {
+              "ruleName": "carga-do-dia",
+              "description": null,
+              "column": "data_hora_transacao",
+              "table": "transacao_cartao",
+              "dataset": "fin_demo_cartoes",
+              "tableKey": "fin_demo_cartoes.transacao_cartao",
+              "scanId": "dq-exemplo-cartoes",
+              "executed": true,
+              "passed": true,
+              "resultKind": "assercao",
+              "evaluatedCount": null,
+              "passedCount": null,
+              "failedCount": null,
+              "passPercentage": null,
+              "assertionRowCount": 0,
+              "dimension": "FRESHNESS",
+              "dimensionId": "tempestividade",
+              "dimensionName": "Tempestividade",
+              "inciso": "XII",
+              "ruleType": "Asserção SQL",
+              "failedRecordsQuery": "",
+              "executionTime": "2026-01-15T08:03:36.000Z"
+            }
+          ]
         }
-      },
+      ],
+      "unmappedRules": [],
       "scannedSourceTables": [
         "fin_demo_cadastro.dados_cadastrais",
         "fin_demo_cartoes.transacao_cartao",
@@ -735,10 +1170,36 @@
           "passedRules": 4,
           "failedRules": 1,
           "notExecutedRules": 0,
-          "accuracyScore": 50,
-          "completenessScore": 100,
-          "consistencyScore": 100,
           "overallScore": 80,
+          "dimensionScores": [
+            {
+              "id": "acuracia",
+              "inciso": "II",
+              "name": "Acurácia",
+              "scorePct": 50,
+              "rulesEvaluated": 2,
+              "rulesPassed": 1,
+              "rulesNotExecuted": 0
+            },
+            {
+              "id": "completude",
+              "inciso": "VI",
+              "name": "Completude",
+              "scorePct": 100,
+              "rulesEvaluated": 2,
+              "rulesPassed": 2,
+              "rulesNotExecuted": 0
+            },
+            {
+              "id": "consistencia",
+              "inciso": "VIII",
+              "name": "Consistência",
+              "scorePct": 100,
+              "rulesEvaluated": 1,
+              "rulesPassed": 1,
+              "rulesNotExecuted": 0
+            }
+          ],
           "lastExecutionTime": "2026-01-15T08:03:36.000Z",
           "status": "Com falhas"
         },
@@ -750,10 +1211,45 @@
           "passedRules": 3,
           "failedRules": 1,
           "notExecutedRules": 0,
-          "accuracyScore": 100,
-          "completenessScore": 100,
-          "consistencyScore": 0,
           "overallScore": 75,
+          "dimensionScores": [
+            {
+              "id": "acuracia",
+              "inciso": "II",
+              "name": "Acurácia",
+              "scorePct": 100,
+              "rulesEvaluated": 1,
+              "rulesPassed": 1,
+              "rulesNotExecuted": 0
+            },
+            {
+              "id": "completude",
+              "inciso": "VI",
+              "name": "Completude",
+              "scorePct": 100,
+              "rulesEvaluated": 1,
+              "rulesPassed": 1,
+              "rulesNotExecuted": 0
+            },
+            {
+              "id": "consistencia",
+              "inciso": "VIII",
+              "name": "Consistência",
+              "scorePct": 0,
+              "rulesEvaluated": 1,
+              "rulesPassed": 0,
+              "rulesNotExecuted": 0
+            },
+            {
+              "id": "tempestividade",
+              "inciso": "XII",
+              "name": "Tempestividade",
+              "scorePct": 100,
+              "rulesEvaluated": 1,
+              "rulesPassed": 1,
+              "rulesNotExecuted": 0
+            }
+          ],
           "lastExecutionTime": "2026-01-15T08:03:36.000Z",
           "status": "Com falhas"
         },
@@ -761,16 +1257,51 @@
           "dataset": "fin_demo_contas",
           "table": "saldos_extratos",
           "fullTableName": "fin_demo_contas.saldos_extratos",
-          "totalRules": 2,
-          "passedRules": 2,
-          "failedRules": 0,
+          "totalRules": 5,
+          "passedRules": 4,
+          "failedRules": 1,
           "notExecutedRules": 0,
-          "accuracyScore": null,
-          "completenessScore": null,
-          "consistencyScore": 100,
-          "overallScore": 100,
+          "overallScore": 80,
+          "dimensionScores": [
+            {
+              "id": "comparabilidade",
+              "inciso": "V",
+              "name": "Comparabilidade",
+              "scorePct": 100,
+              "rulesEvaluated": 1,
+              "rulesPassed": 1,
+              "rulesNotExecuted": 0
+            },
+            {
+              "id": "confiabilidade",
+              "inciso": "VII",
+              "name": "Confiabilidade",
+              "scorePct": 50,
+              "rulesEvaluated": 2,
+              "rulesPassed": 1,
+              "rulesNotExecuted": 0
+            },
+            {
+              "id": "consistencia",
+              "inciso": "VIII",
+              "name": "Consistência",
+              "scorePct": 100,
+              "rulesEvaluated": 1,
+              "rulesPassed": 1,
+              "rulesNotExecuted": 0
+            },
+            {
+              "id": "integridade",
+              "inciso": "IX",
+              "name": "Integridade",
+              "scorePct": 100,
+              "rulesEvaluated": 1,
+              "rulesPassed": 1,
+              "rulesNotExecuted": 0
+            }
+          ],
           "lastExecutionTime": "2026-01-15T08:03:36.000Z",
-          "status": "Sem falhas"
+          "status": "Com falhas"
         },
         {
           "dataset": "fin_demo_credito",
@@ -780,15 +1311,32 @@
           "passedRules": 0,
           "failedRules": 0,
           "notExecutedRules": 2,
-          "accuracyScore": null,
-          "completenessScore": null,
-          "consistencyScore": null,
           "overallScore": null,
+          "dimensionScores": [
+            {
+              "id": "acuracia",
+              "inciso": "II",
+              "name": "Acurácia",
+              "scorePct": null,
+              "rulesEvaluated": 0,
+              "rulesPassed": 0,
+              "rulesNotExecuted": 1
+            },
+            {
+              "id": "completude",
+              "inciso": "VI",
+              "name": "Completude",
+              "scorePct": null,
+              "rulesEvaluated": 0,
+              "rulesPassed": 0,
+              "rulesNotExecuted": 1
+            }
+          ],
           "lastExecutionTime": null,
           "status": "Sem execução"
         }
       ],
-      "otherRulesCount": 2,
+      "otherRulesCount": 0,
       "centralizedCatalogContext": [
         {
           "entryId": "projects/projeto-exemplo/locations/us/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/projeto-exemplo/datasets/fin_demo_cadastro/tables/dados_cadastrais",
@@ -810,6 +1358,12 @@
           "contactsCount": 2,
           "hasOverview": true,
           "queries30d": 412,
+          "glossaryTermLinks": 2,
+          "glossaryTerms": [
+            "cliente",
+            "cpf"
+          ],
+          "glossaryLinksTruncated": false,
           "governanceDomain": "fin_demo_cadastro",
           "dataQualityScore": 80,
           "complianceStatus": "Com falhas",
@@ -835,6 +1389,9 @@
           "contactsCount": 1,
           "hasOverview": false,
           "queries30d": 96,
+          "glossaryTermLinks": 0,
+          "glossaryTerms": [],
+          "glossaryLinksTruncated": false,
           "governanceDomain": "fin_demo_cartoes",
           "dataQualityScore": 75,
           "complianceStatus": "Com falhas",
@@ -859,9 +1416,14 @@
           "contactsCount": 0,
           "hasOverview": false,
           "queries30d": null,
+          "glossaryTermLinks": 1,
+          "glossaryTerms": [
+            "saldo-disponivel"
+          ],
+          "glossaryLinksTruncated": false,
           "governanceDomain": "fin_demo_contas",
-          "dataQualityScore": 100,
-          "complianceStatus": "Sem falhas",
+          "dataQualityScore": 80,
+          "complianceStatus": "Com falhas",
           "found": true,
           "error": null,
           "lastLookupTime": "2026-01-15T08:03:36.000Z"
@@ -884,6 +1446,9 @@
           "contactsCount": 0,
           "hasOverview": true,
           "queries30d": 0,
+          "glossaryTermLinks": 0,
+          "glossaryTerms": [],
+          "glossaryLinksTruncated": false,
           "governanceDomain": "fin_demo_credito",
           "dataQualityScore": null,
           "complianceStatus": "Sem execução",
@@ -895,8 +1460,8 @@
       "lookupContextYaml": null,
       "totalScansFound": 4,
       "totalScansListed": 4,
-      "totalRulesEvaluated": 11,
-      "totalRulesConfigured": 13,
+      "totalRulesEvaluated": 14,
+      "totalRulesConfigured": 16,
       "diagnostics": []
     },
     "lineage": {
@@ -999,7 +1564,7 @@
           "dataset": "fin_demo_contas",
           "table": "saldos_extratos",
           "rows": null,
-          "qualityScore": 100
+          "qualityScore": 80
         },
         {
           "id": "tbl:fin_demo_credito.operacoes_ativas",
@@ -1473,6 +2038,16 @@
           "comoEMedido": "Percentual de tabelas do escopo com contatos registrados no Knowledge Catalog (aspecto contacts).",
           "lacuna": "Cobre apenas a indicação, no catálogo de dados, de a quem dirigir demandas sobre a informação. O local de disponibilização ao usuário, os prazos e o tratamento especial às pessoas com deficiência precisam ser evidenciados pela instituição.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Knowledge Catalog — aspecto contacts",
+              "acao": "Registrar, na entrada de cada tabela, quem atende demandas sobre a informação."
+            },
+            {
+              "recurso": "Knowledge Catalog — aspecto overview",
+              "acao": "Documentar onde a informação fica disponível, como pedir acesso e os prazos."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1501,6 +2076,12 @@
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY).",
           "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos (art. 3º, V, \"a\").",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (ACCURACY, VALIDITY)",
+              "acao": "Validar formato, faixa e domínio dos campos; reconciliar com o sistema de origem por meio de regra SQL que consulta a tabela de origem."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1523,8 +2104,18 @@
           ],
           "fontes": [],
           "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão. É um atributo de arquitetura e de processo, a ser evidenciado pela instituição.",
+          "lacuna": "Não há regras marcadas com a dimensão ADAPTABILIDADE no escopo. É um atributo de arquitetura e de processo: o painel só mostra o resultado dos testes de geração fora da rotina que a instituição registrar.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "BigQuery — tabela de controle",
+              "acao": "Registrar cada teste de geração da informação fora da rotina (demanda não periódica, mudança regulamentar, contingência), com início, entrega, prazo e resultado."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (ADAPTABILIDADE)",
+              "acao": "Asserções SQL que verificam se há teste bem-sucedido de cada cenário dentro da janela definida pela instituição."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1552,6 +2143,16 @@
           "comoEMedido": "Percentual de colunas com descrição nas tabelas do escopo.",
           "lacuna": "Cobre apenas a documentação técnica (dicionário de dados — art. 3º, III, \"c\"). A clareza da informação entregue ao usuário não é avaliada.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "BigQuery — descrições",
+              "acao": "Descrever tabelas e colunas (dicionário de dados)."
+            },
+            {
+              "recurso": "Knowledge Catalog — aspecto overview",
+              "acao": "Documentar o conteúdo e o uso da informação na entrada da tabela."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1559,8 +2160,8 @@
           "inciso": "V",
           "nome": "Comparabilidade",
           "definicao": "capacidade de possibilitar ao usuário identificar e compreender semelhanças e diferenças entre informações, seja em diferentes períodos ou entre diferentes áreas geográficas ou domínios não geográficos",
-          "coleta": "declaratoria",
-          "estado": "nao_medido",
+          "coleta": "parcial",
+          "estado": "sem_dados",
           "indicadores": [],
           "regras": {
             "total": 0,
@@ -1572,10 +2173,22 @@
           "dqDimensions": [
             "COMPARABILIDADE"
           ],
-          "fontes": [],
-          "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão.",
+          "fontes": [
+            "Knowledge Catalog (termos de glossário vinculados)"
+          ],
+          "comoEMedido": "Percentual de tabelas do escopo com termo de glossário vinculado à tabela ou a uma de suas colunas (Knowledge Catalog).",
+          "lacuna": "A definição padronizada ajuda a comparar informações, mas não comprova que valores de períodos, regiões ou domínios diferentes são comparáveis: isso depende de regras de padronização marcadas com a dimensão COMPARABILIDADE.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Knowledge Catalog — glossário de negócios",
+              "acao": "Vincular tabelas e colunas a termos com definição padronizada."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (COMPARABILIDADE)",
+              "acao": "Verificar domínios padronizados contra tabelas de referência, série sem lacunas entre períodos e unidade ou moeda única."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1604,6 +2217,12 @@
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões COMPLETENESS e VOLUME).",
           "lacuna": "Mede apenas os campos e as tabelas com regras configuradas; não verifica se todos os aspectos requeridos pelo demandante foram atendidos.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (COMPLETENESS, VOLUME)",
+              "acao": "Verificar campos obrigatórios preenchidos e volume esperado de registros."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1626,8 +2245,18 @@
           ],
           "fontes": [],
           "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão. A definição trata de revisões: exige comparar o dado revisado com o valor inicialmente prestado.",
+          "lacuna": "Não há regras marcadas com a dimensão CONFIABILIDADE no escopo. A definição trata de revisões: exige comparar o dado revisado com o valor inicialmente prestado.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "BigQuery — snapshot de tabela",
+              "acao": "Guardar a versão informada no momento da remessa (cópia somente leitura)."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (CONFIABILIDADE)",
+              "acao": "Comparar a versão revisada com o snapshot e apontar desvios acima do limite definido pela instituição."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1656,6 +2285,12 @@
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões CONSISTENCY e UNIQUENESS).",
           "lacuna": "A consistência entre fontes distintas depende de regras de reconciliação definidas pela instituição.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (CONSISTENCY, UNIQUENESS)",
+              "acao": "Verificar chaves sem duplicidade e reconciliar a mesma informação entre fontes por meio de regra SQL."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1678,8 +2313,18 @@
           ],
           "fontes": [],
           "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, \"e\".",
+          "lacuna": "Não há regras marcadas com a dimensão INTEGRIDADE no escopo. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, \"e\".",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "BigQuery — hash por registro",
+              "acao": "Gravar na carga um hash do conteúdo de cada registro."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (INTEGRIDADE)",
+              "acao": "Conferir o conteúdo com o hash e exigir revisão registrada para toda diferença em relação à versão informada."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1706,6 +2351,12 @@
           "comoEMedido": "Percentual de tabelas do escopo com origem registrada na Data Lineage API.",
           "lacuna": "Cobre apenas as transformações registradas no Google Cloud. Os trechos fora da plataforma (sistemas de origem e entrega ao usuário final) precisam ser documentados pela instituição.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Data Lineage API",
+              "acao": "Manter a API ativada: os jobs do BigQuery que gravam a tabela registram a origem. Etapas fora do Google Cloud podem ser registradas pela mesma API."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1732,6 +2383,12 @@
           "comoEMedido": "Percentual de tabelas do escopo com consultas registradas nos últimos 30 dias (aspecto usage do Knowledge Catalog).",
           "lacuna": "O uso técnico da tabela não comprova que a informação é útil para a tomada de decisões pelos usuários; a contagem de consultas é a informada pelo catálogo e pode incluir consultas automatizadas.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Knowledge Catalog — aspecto usage",
+              "acao": "Preenchido pelo próprio catálogo com as consultas feitas às tabelas do BigQuery."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1761,13 +2418,19 @@
           "comoEMedido": "Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A data da última modificação das tabelas é exibida apenas como informação.",
           "lacuna": "O cumprimento dos prazos de remessa ao Banco Central do Brasil não é observável nesta plataforma.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (FRESHNESS)",
+              "acao": "Verificar se a carga mais recente está dentro do prazo e se o intervalo entre a data do fato e a disponibilização respeita o limite definido pela instituição."
+            }
+          ],
           "evidencias": []
         }
       ],
       "resumo": {
         "medidas": 0,
-        "semDados": 8,
-        "naoMedidas": 4
+        "semDados": 9,
+        "naoMedidas": 3
       },
       "regrasSemMapeamento": [],
       "diagnostics": []
@@ -1790,44 +2453,8 @@
         "limiteScans": 50,
         "limiteTabelas": 50
       },
-      "dimensions": {
-        "accuracy": {
-          "name": "Acurácia",
-          "inciso": "II",
-          "group": "art. 2º, § 2º, II",
-          "scorePct": null,
-          "rulesEvaluated": 0,
-          "rulesPassed": 0,
-          "rulesNotExecuted": 0,
-          "rules": [],
-          "productGcp": "Dataplex DataScan",
-          "description": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY)."
-        },
-        "completeness": {
-          "name": "Completude",
-          "inciso": "VI",
-          "group": "art. 2º, § 2º, VI",
-          "scorePct": null,
-          "rulesEvaluated": 0,
-          "rulesPassed": 0,
-          "rulesNotExecuted": 0,
-          "rules": [],
-          "productGcp": "Dataplex DataScan",
-          "description": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões COMPLETENESS e VOLUME)."
-        },
-        "consistency": {
-          "name": "Consistência",
-          "inciso": "VIII",
-          "group": "art. 2º, § 2º, VIII",
-          "scorePct": null,
-          "rulesEvaluated": 0,
-          "rulesPassed": 0,
-          "rulesNotExecuted": 0,
-          "rules": [],
-          "productGcp": "Dataplex DataScan",
-          "description": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões CONSISTENCY e UNIQUENESS)."
-        }
-      },
+      "dimensionGroups": [],
+      "unmappedRules": [],
       "scannedSourceTables": [],
       "tableSummaries": [],
       "otherRulesCount": 0,
@@ -1971,6 +2598,16 @@
           "comoEMedido": "Percentual de tabelas do escopo com contatos registrados no Knowledge Catalog (aspecto contacts).",
           "lacuna": "Cobre apenas a indicação, no catálogo de dados, de a quem dirigir demandas sobre a informação. O local de disponibilização ao usuário, os prazos e o tratamento especial às pessoas com deficiência precisam ser evidenciados pela instituição.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Knowledge Catalog — aspecto contacts",
+              "acao": "Registrar, na entrada de cada tabela, quem atende demandas sobre a informação."
+            },
+            {
+              "recurso": "Knowledge Catalog — aspecto overview",
+              "acao": "Documentar onde a informação fica disponível, como pedir acesso e os prazos."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -1999,6 +2636,12 @@
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY).",
           "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos (art. 3º, V, \"a\").",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (ACCURACY, VALIDITY)",
+              "acao": "Validar formato, faixa e domínio dos campos; reconciliar com o sistema de origem por meio de regra SQL que consulta a tabela de origem."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -2021,8 +2664,18 @@
           ],
           "fontes": [],
           "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão. É um atributo de arquitetura e de processo, a ser evidenciado pela instituição.",
+          "lacuna": "Não há regras marcadas com a dimensão ADAPTABILIDADE no escopo. É um atributo de arquitetura e de processo: o painel só mostra o resultado dos testes de geração fora da rotina que a instituição registrar.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "BigQuery — tabela de controle",
+              "acao": "Registrar cada teste de geração da informação fora da rotina (demanda não periódica, mudança regulamentar, contingência), com início, entrega, prazo e resultado."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (ADAPTABILIDADE)",
+              "acao": "Asserções SQL que verificam se há teste bem-sucedido de cada cenário dentro da janela definida pela instituição."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -2050,6 +2703,16 @@
           "comoEMedido": "Percentual de colunas com descrição nas tabelas do escopo.",
           "lacuna": "Cobre apenas a documentação técnica (dicionário de dados — art. 3º, III, \"c\"). A clareza da informação entregue ao usuário não é avaliada.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "BigQuery — descrições",
+              "acao": "Descrever tabelas e colunas (dicionário de dados)."
+            },
+            {
+              "recurso": "Knowledge Catalog — aspecto overview",
+              "acao": "Documentar o conteúdo e o uso da informação na entrada da tabela."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -2057,8 +2720,8 @@
           "inciso": "V",
           "nome": "Comparabilidade",
           "definicao": "capacidade de possibilitar ao usuário identificar e compreender semelhanças e diferenças entre informações, seja em diferentes períodos ou entre diferentes áreas geográficas ou domínios não geográficos",
-          "coleta": "declaratoria",
-          "estado": "nao_medido",
+          "coleta": "parcial",
+          "estado": "sem_dados",
           "indicadores": [],
           "regras": {
             "total": 0,
@@ -2070,10 +2733,22 @@
           "dqDimensions": [
             "COMPARABILIDADE"
           ],
-          "fontes": [],
-          "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão.",
+          "fontes": [
+            "Knowledge Catalog (termos de glossário vinculados)"
+          ],
+          "comoEMedido": "Percentual de tabelas do escopo com termo de glossário vinculado à tabela ou a uma de suas colunas (Knowledge Catalog).",
+          "lacuna": "A definição padronizada ajuda a comparar informações, mas não comprova que valores de períodos, regiões ou domínios diferentes são comparáveis: isso depende de regras de padronização marcadas com a dimensão COMPARABILIDADE.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Knowledge Catalog — glossário de negócios",
+              "acao": "Vincular tabelas e colunas a termos com definição padronizada."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (COMPARABILIDADE)",
+              "acao": "Verificar domínios padronizados contra tabelas de referência, série sem lacunas entre períodos e unidade ou moeda única."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -2102,6 +2777,12 @@
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões COMPLETENESS e VOLUME).",
           "lacuna": "Mede apenas os campos e as tabelas com regras configuradas; não verifica se todos os aspectos requeridos pelo demandante foram atendidos.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (COMPLETENESS, VOLUME)",
+              "acao": "Verificar campos obrigatórios preenchidos e volume esperado de registros."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -2124,8 +2805,18 @@
           ],
           "fontes": [],
           "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão. A definição trata de revisões: exige comparar o dado revisado com o valor inicialmente prestado.",
+          "lacuna": "Não há regras marcadas com a dimensão CONFIABILIDADE no escopo. A definição trata de revisões: exige comparar o dado revisado com o valor inicialmente prestado.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "BigQuery — snapshot de tabela",
+              "acao": "Guardar a versão informada no momento da remessa (cópia somente leitura)."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (CONFIABILIDADE)",
+              "acao": "Comparar a versão revisada com o snapshot e apontar desvios acima do limite definido pela instituição."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -2154,6 +2845,12 @@
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões CONSISTENCY e UNIQUENESS).",
           "lacuna": "A consistência entre fontes distintas depende de regras de reconciliação definidas pela instituição.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (CONSISTENCY, UNIQUENESS)",
+              "acao": "Verificar chaves sem duplicidade e reconciliar a mesma informação entre fontes por meio de regra SQL."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -2176,8 +2873,18 @@
           ],
           "fontes": [],
           "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, \"e\".",
+          "lacuna": "Não há regras marcadas com a dimensão INTEGRIDADE no escopo. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, \"e\".",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "BigQuery — hash por registro",
+              "acao": "Gravar na carga um hash do conteúdo de cada registro."
+            },
+            {
+              "recurso": "Dataplex — regras de qualidade (INTEGRIDADE)",
+              "acao": "Conferir o conteúdo com o hash e exigir revisão registrada para toda diferença em relação à versão informada."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -2204,6 +2911,12 @@
           "comoEMedido": "Percentual de tabelas do escopo com origem registrada na Data Lineage API.",
           "lacuna": "Cobre apenas as transformações registradas no Google Cloud. Os trechos fora da plataforma (sistemas de origem e entrega ao usuário final) precisam ser documentados pela instituição.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Data Lineage API",
+              "acao": "Manter a API ativada: os jobs do BigQuery que gravam a tabela registram a origem. Etapas fora do Google Cloud podem ser registradas pela mesma API."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -2230,6 +2943,12 @@
           "comoEMedido": "Percentual de tabelas do escopo com consultas registradas nos últimos 30 dias (aspecto usage do Knowledge Catalog).",
           "lacuna": "O uso técnico da tabela não comprova que a informação é útil para a tomada de decisões pelos usuários; a contagem de consultas é a informada pelo catálogo e pode incluir consultas automatizadas.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Knowledge Catalog — aspecto usage",
+              "acao": "Preenchido pelo próprio catálogo com as consultas feitas às tabelas do BigQuery."
+            }
+          ],
           "evidencias": []
         },
         {
@@ -2259,13 +2978,19 @@
           "comoEMedido": "Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A data da última modificação das tabelas é exibida apenas como informação.",
           "lacuna": "O cumprimento dos prazos de remessa ao Banco Central do Brasil não é observável nesta plataforma.",
           "porRegrasPersonalizadas": false,
+          "medicao": [
+            {
+              "recurso": "Dataplex — regras de qualidade (FRESHNESS)",
+              "acao": "Verificar se a carga mais recente está dentro do prazo e se o intervalo entre a data do fato e a disponibilização respeita o limite definido pela instituição."
+            }
+          ],
           "evidencias": []
         }
       ],
       "resumo": {
         "medidas": 0,
-        "semDados": 8,
-        "naoMedidas": 4
+        "semDados": 9,
+        "naoMedidas": 3
       },
       "regrasSemMapeamento": [],
       "diagnostics": [
@@ -2295,44 +3020,8 @@
         "limiteScans": 50,
         "limiteTabelas": 50
       },
-      "dimensions": {
-        "accuracy": {
-          "name": "Acurácia",
-          "inciso": "II",
-          "group": "art. 2º, § 2º, II",
-          "scorePct": null,
-          "rulesEvaluated": 0,
-          "rulesPassed": 0,
-          "rulesNotExecuted": 0,
-          "rules": [],
-          "productGcp": "Dataplex DataScan",
-          "description": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY)."
-        },
-        "completeness": {
-          "name": "Completude",
-          "inciso": "VI",
-          "group": "art. 2º, § 2º, VI",
-          "scorePct": null,
-          "rulesEvaluated": 0,
-          "rulesPassed": 0,
-          "rulesNotExecuted": 0,
-          "rules": [],
-          "productGcp": "Dataplex DataScan",
-          "description": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões COMPLETENESS e VOLUME)."
-        },
-        "consistency": {
-          "name": "Consistência",
-          "inciso": "VIII",
-          "group": "art. 2º, § 2º, VIII",
-          "scorePct": null,
-          "rulesEvaluated": 0,
-          "rulesPassed": 0,
-          "rulesNotExecuted": 0,
-          "rules": [],
-          "productGcp": "Dataplex DataScan",
-          "description": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões CONSISTENCY e UNIQUENESS)."
-        }
-      },
+      "dimensionGroups": [],
+      "unmappedRules": [],
       "scannedSourceTables": [],
       "tableSummaries": [],
       "otherRulesCount": 0,

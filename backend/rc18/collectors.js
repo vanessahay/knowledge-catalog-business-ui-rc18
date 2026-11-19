@@ -15,7 +15,14 @@ const { LineageClient } = require('@google-cloud/lineage');
 const { BigQuery } = require('@google-cloud/bigquery');
 const { default: axios } = require('axios');
 const { isDataQualityScan } = require('./dqScans');
-const { normalizeStructValue, scorecardFromEntry, catalogItemFromEntry } = require('./catalogEntries');
+const {
+  normalizeStructValue,
+  scorecardFromEntry,
+  catalogItemFromEntry,
+  glossaryFactsFromLinks,
+} = require('./catalogEntries');
+
+const DEFINITION_LINK_TYPE = 'projects/dataplex-types/locations/global/entryLinkTypes/definition';
 
 const MAX_SCANS = 50;
 // Cada DataScan aponta para uma tabela: com o mesmo limite, a lista de tabelas nunca é cortada
@@ -198,8 +205,9 @@ async function collectLineage({ auth, projectId, tables, metadataByKey = {} }) {
 
 /**
  * Lê as entradas do Knowledge Catalog das tabelas do escopo (GetEntry, visão ALL: aspectos de
- * contatos, documentação, uso e scorecard) e chama `lookupContext` (até 10 recursos
- * por localização).
+ * contatos, documentação, uso e scorecard), os vínculos de cada entrada com termos de glossário
+ * (`lookupEntryLinks`, primeira página: até 10 vínculos por tabela) e chama `lookupContext`
+ * (até 10 recursos por localização).
  */
 async function collectCatalogContext({ auth, projectId, tables, metadataByKey = {}, getAccessToken }) {
   const client = new CatalogServiceClient(clientOptions(auth));
@@ -240,9 +248,28 @@ async function collectCatalogContext({ auth, projectId, tables, metadataByKey = 
     try {
       token = await getAccessToken();
     } catch (err) {
-      diagnostics.push(diag('Knowledge Catalog (lookupContext)', 'credencial', err));
+      diagnostics.push(diag('Knowledge Catalog (lookupContext e lookupEntryLinks)', 'credencial', err));
     }
     if (token) {
+      // Termos de glossário vinculados à tabela ou às suas colunas. Falha de leitura deixa
+      // `glossary` ausente (a tabela fica fora do indicador) e vai para `diagnostics`.
+      await mapLimit(items.filter((i) => i.found), CONCURRENCY, async (item) => {
+        try {
+          const resp = await axios.get(
+            `https://dataplex.googleapis.com/v1/projects/${projectId}/locations/${item.entryLocation}:lookupEntryLinks`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              params: { entry: item.entryName, entryLinkTypes: DEFINITION_LINK_TYPE, pageSize: 10 },
+              timeout: 20000,
+            }
+          );
+          item.glossary = glossaryFactsFromLinks(resp.data);
+        } catch (err) {
+          const apiError = err.response && err.response.data && err.response.data.error;
+          diagnostics.push(diag('Knowledge Catalog (lookupEntryLinks)', item.key, apiError || err));
+        }
+      });
+
       for (const [loc, resources] of byLocation.entries()) {
         try {
           const resp = await axios.post(

@@ -1,5 +1,5 @@
-import React from 'react';
-import { Alert, Box, Card, CardContent, Chip, Grid, Link, Typography } from '@mui/material';
+import React, { useState } from 'react';
+import { Alert, Box, Button, Card, CardContent, Chip, Collapse, Grid, Link, Typography } from '@mui/material';
 import {
   type Rc18Coleta,
   type Rc18Dimension,
@@ -13,7 +13,8 @@ import {
 /**
  * Visão geral das 12 dimensões de qualidade da informação (art. 2º, § 2º, da Resolução
  * Conjunta nº 18/2025). Mostra apenas o que foi medido; dimensões sem coleta aparecem como
- * "não medido automaticamente" — nunca com um percentual presumido.
+ * "não medido automaticamente" — nunca com um percentual presumido. Cada cartão indica com que
+ * recursos do Google Cloud a evidência da dimensão é produzida.
  */
 
 const ESTADO_STYLE: Record<Rc18Estado, { label: string; bg: string; fg: string }> = {
@@ -26,13 +27,19 @@ const ESTADO_STYLE: Record<Rc18Estado, { label: string; bg: string; fg: string }
 const COLETA_LABEL: Record<Rc18Coleta, string> = {
   automatica: 'Coleta: regras de qualidade (DataScans)',
   parcial: 'Coleta: indicador técnico parcial',
-  declaratoria: 'Coleta: sem coletor nesta versão (evidência a cargo da instituição)',
+  declaratoria: 'Coleta: regras de DataScan marcadas com a dimensão personalizada (nenhuma executada no escopo)',
 };
 
 const MAX_EVIDENCES = 3;
 
-const DimensionCard: React.FC<{ dimension: Rc18Dimension }> = ({ dimension: d }) => {
+const DimensionCard: React.FC<{ dimension: Rc18Dimension; onShowRules?: (dimensionId: string) => void }> = ({
+  dimension: d,
+  onShowRules,
+}) => {
   const estado = ESTADO_STYLE[d.estado];
+  const medicao = d.medicao ?? [];
+  // Sem indicador, o caminho para medir já aparece aberto.
+  const [showMedicao, setShowMedicao] = useState<boolean>(d.indicadores.length === 0);
   return (
     <Card
       data-testid={`rc18-dimensao-${d.id}`}
@@ -89,6 +96,16 @@ const DimensionCard: React.FC<{ dimension: Rc18Dimension }> = ({ dimension: d })
           </Typography>
         )}
 
+        {d.regras.total > 0 && onShowRules && (
+          <Button
+            size="small"
+            onClick={() => onShowRules(d.id)}
+            sx={{ textTransform: 'none', fontWeight: 600, padding: 0, minWidth: 0, mb: 1 }}
+          >
+            Ver as {d.regras.total} regra(s) desta dimensão
+          </Button>
+        )}
+
         {d.evidencias.slice(0, MAX_EVIDENCES).map((ev, idx) => (
           <Typography key={idx} variant="caption" sx={{ display: 'block', color: '#5F6368', overflowWrap: 'anywhere' }}>
             {ev.rotulo}: {formatEvidenceValue(ev.valor)}
@@ -116,12 +133,38 @@ const DimensionCard: React.FC<{ dimension: Rc18Dimension }> = ({ dimension: d })
             Dimensões de DataScan agregadas: {d.dqDimensions.join(', ')}
           </Typography>
         </Box>
+
+        {medicao.length > 0 && (
+          <Box sx={{ mt: 1 }}>
+            <Button
+              size="small"
+              onClick={() => setShowMedicao((open) => !open)}
+              aria-expanded={showMedicao}
+              sx={{ textTransform: 'none', fontWeight: 600, padding: 0, minWidth: 0 }}
+            >
+              Como medir no Google Cloud
+            </Button>
+            <Collapse in={showMedicao} unmountOnExit>
+              <Box component="ul" sx={{ margin: '4px 0 0', paddingLeft: '18px' }} data-testid={`rc18-medicao-${d.id}`}>
+                {medicao.map((m) => (
+                  <Typography key={m.recurso} component="li" variant="caption" sx={{ color: '#3C4043' }}>
+                    <strong>{m.recurso}:</strong> {m.acao}
+                  </Typography>
+                ))}
+              </Box>
+            </Collapse>
+          </Box>
+        )}
       </CardContent>
     </Card>
   );
 };
 
-const RC18DimensionsOverview: React.FC<{ report: Rc18DimensionsReport }> = ({ report }) => {
+const RC18DimensionsOverview: React.FC<{
+  report: Rc18DimensionsReport;
+  /** Abre a lista de regras de uma dimensão (visão "Qualidade por tabela"). */
+  onShowRules?: (dimensionId: string) => void;
+}> = ({ report, onShowRules }) => {
   const { norma, escopo, resumo } = report;
   return (
     <Box>
@@ -142,7 +185,8 @@ const RC18DimensionsOverview: React.FC<{ report: Rc18DimensionsReport }> = ({ re
       <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px', marginBottom: '16px' }}>
         Escopo: {escopo.tabelas.length} tabela(s) — {escopo.criterio}. DataScans de qualidade lidos:{' '}
         {escopo.scansLidos} de {escopo.scansDeQualidade}
-        {escopo.truncado ? ' (lista truncada pelo limite do painel)' : ''}.
+        {escopo.truncado ? ' (lista truncada pelo limite do painel)' : ''}. Cada cartão indica com que recursos do
+        Google Cloud a evidência é produzida; a pasta rc18-kit do repositório traz regras e comandos de exemplo.
       </Typography>
 
       {escopo.tabelas.length === 0 && (
@@ -162,7 +206,7 @@ const RC18DimensionsOverview: React.FC<{ report: Rc18DimensionsReport }> = ({ re
       <Grid container spacing={2}>
         {report.dimensoes.map((d) => (
           <Grid key={d.id} size={{ xs: 12, md: 6, lg: 4 }}>
-            <DimensionCard dimension={d} />
+            <DimensionCard dimension={d} onShowRules={onShowRules} />
           </Grid>
         ))}
       </Grid>

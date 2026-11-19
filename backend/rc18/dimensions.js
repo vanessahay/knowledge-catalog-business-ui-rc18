@@ -9,8 +9,10 @@
  *     'automatica'   -> indicador calculado a partir de regras de qualidade (Dataplex DataScans);
  *     'parcial'      -> indicador técnico que cobre apenas parte da definição (metadados do
  *                       BigQuery, Data Lineage API ou aspectos do Knowledge Catalog);
- *     'declaratoria' -> sem coletor nesta versão (só aparece indicador se a instituição
- *                       marcar regras de DataScan com a dimensão personalizada correspondente).
+ *     'declaratoria' -> sem coletor próprio: o indicador vem das regras de DataScan que a
+ *                       instituição marcar com a dimensão personalizada correspondente.
+ * - `medicao` lista os recursos do Google Cloud com que a instituição produz a evidência lida
+ *   pelo painel (exemplos prontos na pasta `rc18-kit/` do repositório).
  * - `dqDimensions` são os nomes de dimensão do Dataplex DataScan agregados em cada dimensão.
  *   O mapeamento das dimensões padrão (VALIDITY, UNIQUENESS, VOLUME, FRESHNESS) e a escolha dos
  *   indicadores parciais (contatos -> acessibilidade, uso -> relevância etc.) são escolhas deste
@@ -44,6 +46,10 @@ const DIMENSIONS = Object.freeze([
       'Percentual de tabelas do escopo com contatos registrados no Knowledge Catalog (aspecto contacts).',
     lacuna:
       'Cobre apenas a indicação, no catálogo de dados, de a quem dirigir demandas sobre a informação. O local de disponibilização ao usuário, os prazos e o tratamento especial às pessoas com deficiência precisam ser evidenciados pela instituição.',
+    medicao: [
+      { recurso: 'Knowledge Catalog — aspecto contacts', acao: 'Registrar, na entrada de cada tabela, quem atende demandas sobre a informação.' },
+      { recurso: 'Knowledge Catalog — aspecto overview', acao: 'Documentar onde a informação fica disponível, como pedir acesso e os prazos.' },
+    ],
   },
   {
     id: 'acuracia',
@@ -58,6 +64,9 @@ const DIMENSIONS = Object.freeze([
       'Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY).',
     lacuna:
       'Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos (art. 3º, V, "a").',
+    medicao: [
+      { recurso: 'Dataplex — regras de qualidade (ACCURACY, VALIDITY)', acao: 'Validar formato, faixa e domínio dos campos; reconciliar com o sistema de origem por meio de regra SQL que consulta a tabela de origem.' },
+    ],
   },
   {
     id: 'adaptabilidade',
@@ -70,7 +79,11 @@ const DIMENSIONS = Object.freeze([
     fontes: [],
     comoEMedido: null,
     lacuna:
-      'Sem coleta automática nesta versão. É um atributo de arquitetura e de processo, a ser evidenciado pela instituição.',
+      'Não há regras marcadas com a dimensão ADAPTABILIDADE no escopo. É um atributo de arquitetura e de processo: o painel só mostra o resultado dos testes de geração fora da rotina que a instituição registrar.',
+    medicao: [
+      { recurso: 'BigQuery — tabela de controle', acao: 'Registrar cada teste de geração da informação fora da rotina (demanda não periódica, mudança regulamentar, contingência), com início, entrega, prazo e resultado.' },
+      { recurso: 'Dataplex — regras de qualidade (ADAPTABILIDADE)', acao: 'Asserções SQL que verificam se há teste bem-sucedido de cada cenário dentro da janela definida pela instituição.' },
+    ],
   },
   {
     id: 'clareza',
@@ -84,6 +97,10 @@ const DIMENSIONS = Object.freeze([
     comoEMedido: 'Percentual de colunas com descrição nas tabelas do escopo.',
     lacuna:
       'Cobre apenas a documentação técnica (dicionário de dados — art. 3º, III, "c"). A clareza da informação entregue ao usuário não é avaliada.',
+    medicao: [
+      { recurso: 'BigQuery — descrições', acao: 'Descrever tabelas e colunas (dicionário de dados).' },
+      { recurso: 'Knowledge Catalog — aspecto overview', acao: 'Documentar o conteúdo e o uso da informação na entrada da tabela.' },
+    ],
   },
   {
     id: 'comparabilidade',
@@ -91,11 +108,17 @@ const DIMENSIONS = Object.freeze([
     nome: 'Comparabilidade',
     definicao:
       'capacidade de possibilitar ao usuário identificar e compreender semelhanças e diferenças entre informações, seja em diferentes períodos ou entre diferentes áreas geográficas ou domínios não geográficos',
-    coleta: 'declaratoria',
+    coleta: 'parcial',
     dqDimensions: ['COMPARABILIDADE'],
-    fontes: [],
-    comoEMedido: null,
-    lacuna: 'Sem coleta automática nesta versão.',
+    fontes: ['Knowledge Catalog (termos de glossário vinculados)'],
+    comoEMedido:
+      'Percentual de tabelas do escopo com termo de glossário vinculado à tabela ou a uma de suas colunas (Knowledge Catalog).',
+    lacuna:
+      'A definição padronizada ajuda a comparar informações, mas não comprova que valores de períodos, regiões ou domínios diferentes são comparáveis: isso depende de regras de padronização marcadas com a dimensão COMPARABILIDADE.',
+    medicao: [
+      { recurso: 'Knowledge Catalog — glossário de negócios', acao: 'Vincular tabelas e colunas a termos com definição padronizada.' },
+      { recurso: 'Dataplex — regras de qualidade (COMPARABILIDADE)', acao: 'Verificar domínios padronizados contra tabelas de referência, série sem lacunas entre períodos e unidade ou moeda única.' },
+    ],
   },
   {
     id: 'completude',
@@ -109,6 +132,9 @@ const DIMENSIONS = Object.freeze([
       'Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões COMPLETENESS e VOLUME).',
     lacuna:
       'Mede apenas os campos e as tabelas com regras configuradas; não verifica se todos os aspectos requeridos pelo demandante foram atendidos.',
+    medicao: [
+      { recurso: 'Dataplex — regras de qualidade (COMPLETENESS, VOLUME)', acao: 'Verificar campos obrigatórios preenchidos e volume esperado de registros.' },
+    ],
   },
   {
     id: 'confiabilidade',
@@ -120,7 +146,11 @@ const DIMENSIONS = Object.freeze([
     fontes: [],
     comoEMedido: null,
     lacuna:
-      'Sem coleta automática nesta versão. A definição trata de revisões: exige comparar o dado revisado com o valor inicialmente prestado.',
+      'Não há regras marcadas com a dimensão CONFIABILIDADE no escopo. A definição trata de revisões: exige comparar o dado revisado com o valor inicialmente prestado.',
+    medicao: [
+      { recurso: 'BigQuery — snapshot de tabela', acao: 'Guardar a versão informada no momento da remessa (cópia somente leitura).' },
+      { recurso: 'Dataplex — regras de qualidade (CONFIABILIDADE)', acao: 'Comparar a versão revisada com o snapshot e apontar desvios acima do limite definido pela instituição.' },
+    ],
   },
   {
     id: 'consistencia',
@@ -135,6 +165,9 @@ const DIMENSIONS = Object.freeze([
       'Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões CONSISTENCY e UNIQUENESS).',
     lacuna:
       'A consistência entre fontes distintas depende de regras de reconciliação definidas pela instituição.',
+    medicao: [
+      { recurso: 'Dataplex — regras de qualidade (CONSISTENCY, UNIQUENESS)', acao: 'Verificar chaves sem duplicidade e reconciliar a mesma informação entre fontes por meio de regra SQL.' },
+    ],
   },
   {
     id: 'integridade',
@@ -147,7 +180,11 @@ const DIMENSIONS = Object.freeze([
     fontes: [],
     comoEMedido: null,
     lacuna:
-      'Sem coleta automática nesta versão. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, "e".',
+      'Não há regras marcadas com a dimensão INTEGRIDADE no escopo. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, "e".',
+    medicao: [
+      { recurso: 'BigQuery — hash por registro', acao: 'Gravar na carga um hash do conteúdo de cada registro.' },
+      { recurso: 'Dataplex — regras de qualidade (INTEGRIDADE)', acao: 'Conferir o conteúdo com o hash e exigir revisão registrada para toda diferença em relação à versão informada.' },
+    ],
   },
   {
     id: 'rastreabilidade',
@@ -161,6 +198,9 @@ const DIMENSIONS = Object.freeze([
     comoEMedido: 'Percentual de tabelas do escopo com origem registrada na Data Lineage API.',
     lacuna:
       'Cobre apenas as transformações registradas no Google Cloud. Os trechos fora da plataforma (sistemas de origem e entrega ao usuário final) precisam ser documentados pela instituição.',
+    medicao: [
+      { recurso: 'Data Lineage API', acao: 'Manter a API ativada: os jobs do BigQuery que gravam a tabela registram a origem. Etapas fora do Google Cloud podem ser registradas pela mesma API.' },
+    ],
   },
   {
     id: 'relevancia',
@@ -175,6 +215,9 @@ const DIMENSIONS = Object.freeze([
       'Percentual de tabelas do escopo com consultas registradas nos últimos 30 dias (aspecto usage do Knowledge Catalog).',
     lacuna:
       'O uso técnico da tabela não comprova que a informação é útil para a tomada de decisões pelos usuários; a contagem de consultas é a informada pelo catálogo e pode incluir consultas automatizadas.',
+    medicao: [
+      { recurso: 'Knowledge Catalog — aspecto usage', acao: 'Preenchido pelo próprio catálogo com as consultas feitas às tabelas do BigQuery.' },
+    ],
   },
   {
     id: 'tempestividade',
@@ -188,6 +231,9 @@ const DIMENSIONS = Object.freeze([
     comoEMedido:
       'Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A data da última modificação das tabelas é exibida apenas como informação.',
     lacuna: 'O cumprimento dos prazos de remessa ao Banco Central do Brasil não é observável nesta plataforma.',
+    medicao: [
+      { recurso: 'Dataplex — regras de qualidade (FRESHNESS)', acao: 'Verificar se a carga mais recente está dentro do prazo e se o intervalo entre a data do fato e a disponibilização respeita o limite definido pela instituição.' },
+    ],
   },
 ]);
 

@@ -17,9 +17,10 @@ const crypto = require('crypto');
 const fs = require('fs').promises;
 const { GoogleAuth } = require('google-auth-library');
 
-const { NORMA, DIMENSIONS, buildDqDimensionIndex } = require('../rc18/dimensions');
-const { rulesFromScan, scoreFromRules, statusFromScore, tablesFromRules, round2 } = require('../rc18/dqScans');
+const { NORMA } = require('../rc18/dimensions');
+const { rulesFromScan, tablesFromRules } = require('../rc18/dqScans');
 const { buildDimensionReport } = require('../rc18/dimensionReport');
+const { buildQualityView } = require('../rc18/qualityView');
 const { buildLineageView } = require('../rc18/lineageView');
 const { findingsFromTableMetadata, buildSensitiveDataReport } = require('../rc18/sensitiveData');
 const collectors = require('../rc18/collectors');
@@ -28,7 +29,6 @@ const demoData = require('../rc18/demoData');
 const SCOPE_CRITERION =
   'Tabelas com DataScan de qualidade de dados (Dataplex) no projeto e na localização selecionados';
 const PLACEHOLDER_PROJECTS = new Set(['', 'your-project-id', 'your-gcp-project-id', '****']);
-const LEGACY_BUCKETS = { acuracia: 'accuracy', completude: 'completeness', consistencia: 'consistency' };
 
 const CACHE_TTL_MS = 60 * 1000;
 const CACHE_MAX_ENTRIES = 300;
@@ -68,100 +68,6 @@ function bearerToken(req) {
   if (!/^Bearer$/i.test(scheme) || !value) return null;
   const token = value.trim();
   return token && token !== 'null' && token !== 'undefined' ? token : null;
-}
-
-function toLegacyRule(r) {
-  const hasCounts = r.evaluatedCount !== null && r.passedCount !== null;
-  return {
-    ruleName: r.ruleName || `${r.ruleType}${r.column ? ` (${r.column})` : ''}`,
-    column: r.column || '—',
-    table: r.table || r.tableKey || '—',
-    dataset: r.dataset || '—',
-    scanId: r.scanId,
-    executed: r.executed,
-    passed: r.executed ? r.passed : null,
-    evaluatedCount: r.evaluatedCount,
-    passedCount: r.passedCount,
-    failedCount: hasCounts ? Math.max(0, r.evaluatedCount - r.passedCount) : null,
-    passPercentage: r.passRatio !== null ? round2(r.passRatio * 100) : null,
-    dimension: r.dqDimension || '—',
-    ruleType: r.ruleType,
-    failedRecordsQuery: r.failingRowsQuery || '',
-    executionTime: r.executionTime,
-  };
-}
-
-/** Visão "qualidade por tabela": acurácia (II), completude (VI) e consistência (VIII). */
-function buildQualityView(rules) {
-  const index = buildDqDimensionIndex();
-  const bucketOf = new Map();
-  const buckets = { accuracy: [], completeness: [], consistency: [] };
-  let otherRules = 0;
-
-  for (const r of rules) {
-    const bucket = LEGACY_BUCKETS[r.dqDimension ? index.get(r.dqDimension) : undefined];
-    if (bucket) {
-      buckets[bucket].push(r);
-      bucketOf.set(r, bucket);
-    } else {
-      otherRules += 1;
-    }
-  }
-
-  const dimension = (bucket, id) => {
-    const d = DIMENSIONS.find((x) => x.id === id);
-    const s = scoreFromRules(buckets[bucket]);
-    return {
-      name: d.nome,
-      inciso: d.inciso,
-      group: `art. 2º, § 2º, ${d.inciso}`,
-      scorePct: s.scorePct,
-      rulesEvaluated: s.rulesExecuted,
-      rulesPassed: s.rulesPassed,
-      rulesNotExecuted: s.rulesNotExecuted,
-      rules: buckets[bucket].map(toLegacyRule),
-      productGcp: 'Dataplex DataScan',
-      description: d.comoEMedido,
-    };
-  };
-
-  const byTable = new Map();
-  for (const r of rules) {
-    const key = r.tableKey || '—';
-    if (!byTable.has(key)) byTable.set(key, []);
-    byTable.get(key).push(r);
-  }
-
-  const tableSummaries = [...byTable.entries()].map(([key, list]) => {
-    const pick = (bucket) => scoreFromRules(list.filter((r) => bucketOf.get(r) === bucket)).scorePct;
-    const all = scoreFromRules(list);
-    const times = list.map((r) => r.executionTime).filter(Boolean).sort();
-    return {
-      dataset: list[0].dataset || '—',
-      table: list[0].table || key,
-      fullTableName: key,
-      totalRules: all.rulesTotal,
-      passedRules: all.rulesPassed,
-      failedRules: all.rulesFailed,
-      notExecutedRules: all.rulesNotExecuted,
-      accuracyScore: pick('accuracy'),
-      completenessScore: pick('completeness'),
-      consistencyScore: pick('consistency'),
-      overallScore: all.scorePct,
-      lastExecutionTime: times.length > 0 ? times[times.length - 1] : null,
-      status: statusFromScore(all),
-    };
-  });
-
-  return {
-    dimensions: {
-      accuracy: dimension('accuracy', 'acuracia'),
-      completeness: dimension('completeness', 'completude'),
-      consistency: dimension('consistency', 'consistencia'),
-    },
-    tableSummaries,
-    otherRulesCount: otherRules,
-  };
 }
 
 function createRc18Router({ getAuthClient, getRequestAccessToken, dataFilePath }) {
@@ -393,7 +299,10 @@ function createRc18Router({ getAuthClient, getRequestAccessToken, dataFilePath }
     })
   );
 
-  /** GET /api/v1/rc18/data-quality-dimensions — regras por tabela e contexto do Knowledge Catalog. */
+  /**
+   * GET /api/v1/rc18/data-quality-dimensions — regras de todos os DataScans, agrupadas pela
+   * dimensão da Resolução a que foram atribuídas, e contexto do Knowledge Catalog por tabela.
+   */
   router.get(
     '/data-quality-dimensions',
     handle('data-quality-dimensions', async (ctx, req, res) => {
@@ -416,6 +325,10 @@ function createRc18Router({ getAuthClient, getRequestAccessToken, dataFilePath }
           contactsCount: item.facts ? item.facts.contactsCount : null,
           hasOverview: item.facts ? item.facts.hasOverview : null,
           queries30d: item.facts ? item.facts.queries30d : null,
+          // `null` = vínculos não lidos; número = vínculos com termos de glossário (até 10 lidos).
+          glossaryTermLinks: item.glossary ? item.glossary.termLinks : null,
+          glossaryTerms: item.glossary ? item.glossary.terms : [],
+          glossaryLinksTruncated: item.glossary ? item.glossary.truncated : false,
           governanceDomain: item.dataset,
           dataQualityScore: ts ? ts.overallScore : null,
           complianceStatus: ts ? ts.status : 'Sem execução',
@@ -428,7 +341,8 @@ function createRc18Router({ getAuthClient, getRequestAccessToken, dataFilePath }
       res.json({
         ...base,
         escopo: scopeOf(sc),
-        dimensions: view.dimensions,
+        dimensionGroups: view.dimensionGroups,
+        unmappedRules: view.unmappedRules,
         scannedSourceTables: sc.tables.map((t) => t.key),
         tableSummaries: view.tableSummaries,
         otherRulesCount: view.otherRulesCount,
@@ -494,4 +408,4 @@ function createRc18Router({ getAuthClient, getRequestAccessToken, dataFilePath }
   return router;
 }
 
-module.exports = { createRc18Router, buildQualityView, resolveTargetProjectId };
+module.exports = { createRc18Router, resolveTargetProjectId };

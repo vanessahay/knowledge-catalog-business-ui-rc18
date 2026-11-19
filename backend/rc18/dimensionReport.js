@@ -2,13 +2,14 @@
 
 /**
  * Monta o relatório das 12 dimensões (art. 2º, § 2º) a partir das evidências coletadas:
- * regras dos DataScans, metadados do BigQuery, Data Lineage API e entradas do Knowledge Catalog.
+ * regras dos DataScans, metadados do BigQuery, Data Lineage API e entradas do Knowledge Catalog
+ * (aspectos e vínculos com termos de glossário).
  * Função pura: não chama APIs e não preenche lacunas com valores presumidos.
  *
  * estado de cada dimensão:
  *   'medido'     -> há pelo menos um indicador calculado a partir de dados coletados;
  *   'sem_dados'  -> existe coletor para a dimensão, mas nada foi encontrado no escopo;
- *   'nao_medido' -> não há coletor nesta versão e não há regras marcadas com a dimensão.
+ *   'nao_medido' -> a dimensão não tem coletor próprio e não há regras marcadas com ela.
  */
 
 const { DIMENSIONS, buildDqDimensionIndex } = require('./dimensions');
@@ -43,6 +44,8 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
   // Entradas do Knowledge Catalog lidas com sucesso (GetEntry) para as tabelas do escopo.
   const okCatalog = catalog.filter((c) => c.found && c.facts);
   const countCatalog = (pick) => okCatalog.filter((c) => pick(c.facts)).length;
+  // Entradas cujos vínculos com termos de glossário foram lidos (lookupEntryLinks).
+  const okGlossary = okCatalog.filter((c) => c.glossary);
 
   const dimensoes = dimensions.map((d) => {
     const regras = byDimension.get(d.id);
@@ -59,6 +62,28 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
         denominador: score.rulesExecuted,
         unidade: 'regras',
       });
+      // O indicador junta a última execução de cada DataScan: as datas podem ser distantes.
+      const times = regras.filter((r) => r.executed && r.executionTime).map((r) => r.executionTime).sort();
+      if (times.length > 0) {
+        evidencias.push({ rotulo: 'Regras: execução mais recente', valor: times[times.length - 1] });
+        if (times[0] !== times[times.length - 1]) {
+          evidencias.push({ rotulo: 'Regras: execução mais antiga', valor: times[0] });
+        }
+      }
+    }
+
+    if (d.id === 'comparabilidade' && okGlossary.length > 0) {
+      const withTerms = okGlossary.filter((c) => c.glossary.termLinks > 0).length;
+      indicadores.push({
+        id: 'tabelas_com_termo_de_glossario',
+        rotulo: 'Tabelas do escopo com termo de glossário vinculado (Knowledge Catalog)',
+        valorPct: round2((100 * withTerms) / okGlossary.length),
+        numerador: withTerms,
+        denominador: okGlossary.length,
+        unidade: 'tabelas',
+      });
+      const terms = new Set(okGlossary.flatMap((c) => c.glossary.terms));
+      evidencias.push({ rotulo: 'Termos de glossário distintos vinculados', valor: String(terms.size) });
     }
 
     if (d.id === 'acessibilidade' && okCatalog.length > 0) {
@@ -162,6 +187,8 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
       comoEMedido: porRegrasPersonalizadas ? COMO_MEDIDO_REGRAS_PERSONALIZADAS : d.comoEMedido,
       lacuna: porRegrasPersonalizadas ? LIMITE_REGRAS_PERSONALIZADAS : d.lacuna,
       porRegrasPersonalizadas,
+      // Recursos do Google Cloud com que a instituição produz a evidência desta dimensão.
+      medicao: d.medicao || [],
       evidencias,
     };
   });

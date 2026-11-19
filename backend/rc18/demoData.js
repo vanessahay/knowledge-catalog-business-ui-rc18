@@ -8,15 +8,18 @@
  * exatamente o mesmo código dos dados reais. Nomes de datasets, tabelas e valores são fictícios.
  */
 
-const { catalogItemFromEntry } = require('./catalogEntries');
+const { catalogItemFromEntry, glossaryFactsFromLinks } = require('./catalogEntries');
 
 const DEMO_TIME = '2026-01-15T08:03:36.000Z';
 
-function executedRule(column, dimension, typeKey, passed, evaluated, passedCount, name) {
+function executedRule(column, dimension, typeKey, passed, evaluated, passedCount, name, extra = {}) {
   const item = {
     rule: { column, dimension, name, [typeKey]: {} },
     failingRowsQuery: passed ? '' : `SELECT * FROM tabela_exemplo WHERE /* regra ${name} */ FALSE`,
   };
+  if (extra.description) item.rule.description = extra.description;
+  // Como na API: a quantidade de linhas de uma asserção só vem quando é maior que zero.
+  if (extra.assertionRowCount) item.assertionRowCount = String(extra.assertionRowCount);
   if (passed) item.passed = true;
   if (evaluated !== null) {
     item.evaluatedCount = String(evaluated);
@@ -63,8 +66,20 @@ function demoScans(projectId) {
     demoScan(projectId, 'dq-exemplo-contas', 'fin_demo_contas', 'saldos_extratos', {
       result: [
         executedRule('saldo_disponivel', 'CONSISTENCY', 'rowConditionExpectation', true, 94300, 94300, 'saldo-confere-lancamentos'),
-        // Exemplo de dimensão personalizada com o nome de uma dimensão da Resolução.
-        executedRule(null, 'INTEGRIDADE', 'tableConditionExpectation', true, null, null, 'hash-de-carga-confere'),
+        // Exemplos de dimensões personalizadas com o nome de uma dimensão da Resolução.
+        executedRule(null, 'INTEGRIDADE', 'tableConditionExpectation', true, null, null, 'hash-de-carga-confere', {
+          description: 'O hash do lote carregado confere com o hash calculado na origem.',
+        }),
+        executedRule(null, 'CONFIABILIDADE', 'sqlAssertion', false, null, null, 'revisao-sem-desvio-relevante', {
+          description: 'Nenhum saldo revisado se afasta mais de 5% do valor informado (comparação com o snapshot da remessa).',
+          assertionRowCount: 3,
+        }),
+        executedRule(null, 'CONFIABILIDADE', 'tableConditionExpectation', true, null, null, 'total-revisado-proximo-do-informado', {
+          description: 'O saldo total revisado difere no máximo 1% do total informado.',
+        }),
+        executedRule(null, 'COMPARABILIDADE', 'sqlAssertion', true, null, null, 'moeda-unica-por-data-base', {
+          description: 'Cada data-base usa uma única moeda.',
+        }),
       ],
     }),
     // Scan configurado e ainda não executado: aparece como "sem execução" e não entra em score.
@@ -168,6 +183,11 @@ function demoCatalog(projectId) {
     ],
     refreshTime: DEMO_TIME,
   });
+  // Colunas vinculadas a termos de glossário (coluna, termo), por tabela.
+  const termLinks = {
+    dados_cadastrais: [['cpf', 'cpf'], ['id_cliente', 'cliente']],
+    saldos_extratos: [['saldo_disponivel', 'saldo-disponivel']],
+  };
   const mk = (dataset, table, aspects) => {
     const entryName = `projects/${projectId}/locations/us/entryGroups/@bigquery/entries/bigquery.googleapis.com/projects/${projectId}/datasets/${dataset}/tables/${table}`;
     const entry = {
@@ -186,7 +206,21 @@ function demoCatalog(projectId) {
       table,
       linkedResource: `//bigquery.googleapis.com/projects/${projectId}/datasets/${dataset}/tables/${table}`,
     };
-    return catalogItemFromEntry(base, entry, { entryName, entryLocation: 'us' });
+    const item = catalogItemFromEntry(base, entry, { entryName, entryLocation: 'us' });
+    // Vínculos com termos de glossário, no formato da resposta de lookupEntryLinks.
+    item.glossary = glossaryFactsFromLinks({
+      entryLinks: (termLinks[table] || []).map(([column, term]) => ({
+        entryLinkType: 'projects/dataplex-types/locations/global/entryLinkTypes/definition',
+        entryReferences: [
+          { name: entryName, path: `Schema.${column}`, type: 'SOURCE' },
+          {
+            name: `projects/${projectId}/locations/global/entryGroups/@dataplex/entries/projects/${projectId}/locations/global/glossaries/glossario-exemplo/terms/${term}`,
+            type: 'TARGET',
+          },
+        ],
+      })),
+    });
+    return item;
   };
   return [
     mk('fin_demo_cadastro', 'dados_cadastrais', {

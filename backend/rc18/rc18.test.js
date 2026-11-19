@@ -10,9 +10,10 @@ const { rulesFromScan, scoreFromRules, statusFromScore, tablesFromRules, toIsoTi
 const { buildDimensionReport } = require('./dimensionReport');
 const { buildLineageView } = require('./lineageView');
 const { classifyColumnName, findingsFromTableMetadata, buildSensitiveDataReport } = require('./sensitiveData');
-const { scorecardFromEntry, catalogFactsFromEntry, catalogItemFromEntry } = require('./catalogEntries');
+const { scorecardFromEntry, catalogFactsFromEntry, catalogItemFromEntry, glossaryFactsFromLinks } = require('./catalogEntries');
 const demoData = require('./demoData');
-const { buildQualityView, createRc18Router } = require('../routes/rc18Routes');
+const { buildQualityView } = require('./qualityView');
+const { createRc18Router } = require('../routes/rc18Routes');
 
 const PROJECT = 'projeto-exemplo';
 
@@ -32,6 +33,13 @@ test('catálogo: 12 dimensões, incisos I a XII, na ordem do art. 2º, § 2º', 
     assert.ok(d.definicao.length > 20, `definição de ${d.id}`);
     assert.ok(['automatica', 'parcial', 'declaratoria'].includes(d.coleta));
     assert.ok(d.lacuna, `lacuna de ${d.id}`);
+    // Toda dimensão indica com que recursos do Google Cloud a evidência é produzida.
+    assert.ok(d.medicao.length > 0, `medição de ${d.id}`);
+    for (const m of d.medicao) assert.ok(m.recurso && m.acao, `medição de ${d.id}`);
+  }
+  // Dimensão sem coletor próprio: a medição indicada inclui regras com a dimensão personalizada.
+  for (const d of DIMENSIONS.filter((x) => x.coleta === 'declaratoria')) {
+    assert.ok(d.medicao.some((m) => m.recurso.includes(d.dqDimensions[0])), d.id);
   }
   assert.equal(NORMA.dispositivoDimensoes, 'art. 2º, § 2º, incisos I a XII');
 });
@@ -83,6 +91,59 @@ test('regras executadas: "passed" omitido significa reprovada; contagens vêm da
   assert.equal(rules[0].executionTime, '2026-01-15T08:03:36.000Z');
   assert.equal(rules[0].tableKey, 'd.t');
   assert.equal(rules[0].location, 'us-central1');
+  assert.deepEqual(rules.map((r) => r.resultKind), ['linhas', 'linhas', 'agregada']);
+  assert.equal(rules[0].assertionRowCount, null);
+});
+
+test('asserções SQL: quantidade de linhas em desacordo; aprovada = zero linhas', () => {
+  // Formato REST de GetDataScan(view=FULL) para regras com dimensão personalizada.
+  const scan = {
+    name: `projects/${PROJECT}/locations/us-central1/dataScans/s3`,
+    type: 'DATA_QUALITY',
+    data: { resource: '//bigquery.googleapis.com/projects/p/datasets/d/tables/t' },
+    executionStatus: { latestJobEndTime: '2026-01-15T08:03:36Z' },
+    dataQualityResult: {
+      rules: [
+        { rule: { name: 'revisao', description: 'Compara com o snapshot.', dimension: 'CONFIABILIDADE', sqlAssertion: { sqlStatement: 'SELECT 1' } }, assertionRowCount: '2', failingRowsQuery: 'SELECT 1' },
+        { rule: { name: 'exclusao', dimension: 'INTEGRIDADE', sqlAssertion: { sqlStatement: 'SELECT 1' } }, passed: true },
+        { rule: { name: 'total', dimension: 'CONFIABILIDADE', tableConditionExpectation: { sqlExpression: 'TRUE' } }, passed: true, evaluatedCount: '600' },
+        { rule: { name: 'modelo', dimension: 'FRESHNESS', templateReference: { name: 'projects/p/locations/global/entryGroups/g/entries/e' } }, passed: true },
+      ],
+    },
+  };
+  const rules = rulesFromScan(scan);
+  assert.deepEqual(rules.map((r) => r.resultKind), ['assercao', 'assercao', 'agregada', 'assercao']);
+  assert.equal(rules[0].passed, false);
+  assert.equal(rules[0].assertionRowCount, 2);
+  assert.equal(rules[0].ruleDescription, 'Compara com o snapshot.');
+  assert.equal(rules[1].assertionRowCount, 0);
+  // Condição agregada não tem contagem de linhas em desacordo.
+  assert.equal(rules[2].assertionRowCount, null);
+  assert.equal(rules[3].ruleType, 'Modelo de regra');
+
+  // Formato gRPC (SDK): os contadores que não cabem à regra vêm zerados, não ausentes.
+  const grpc = rulesFromScan({
+    ...scan,
+    dataQualityResult: {
+      rules: [
+        { rule: { dimension: 'INTEGRIDADE', sqlAssertion: {} }, passed: false, evaluatedCount: '0', passedCount: '0', passRatio: 0, assertionRowCount: '1' },
+        { rule: { dimension: 'CONFIABILIDADE', tableConditionExpectation: {} }, passed: true, evaluatedCount: '600', passedCount: '0', passRatio: 0, assertionRowCount: '0' },
+        { rule: { dimension: 'INTEGRIDADE', rowConditionExpectation: {} }, passed: false, evaluatedCount: '600', passedCount: '599', passRatio: 0.9983, assertionRowCount: '0' },
+      ],
+    },
+  });
+  assert.deepEqual(
+    grpc.map((r) => [r.evaluatedCount, r.passedCount, r.passRatio, r.assertionRowCount]),
+    [
+      [null, null, null, 1],
+      [600, null, null, null],
+      [600, 599, 0.9983, null],
+    ]
+  );
+  // Regra de asserção apenas configurada: sem execução, sem contagem.
+  const spec = rulesFromScan({ ...scan, dataQualityResult: undefined, dataQualitySpec: { rules: [scan.dataQualityResult.rules[0].rule] } });
+  assert.equal(spec[0].executed, false);
+  assert.equal(spec[0].assertionRowCount, null);
 });
 
 test('regras apenas configuradas: sem execução, sem métricas e fora do score', () => {
@@ -146,12 +207,24 @@ test('relatório das 12 dimensões (dados de demonstração)', () => {
   assert.equal(by.consistencia.indicadores[0].denominador, 3);
   assert.equal(by.tempestividade.indicadores[0].denominador, 1);
 
-  // Dimensão declaratória só é "medida" se houver regra marcada com a dimensão personalizada.
+  // Dimensão sem coletor próprio só é "medida" se houver regra marcada com a dimensão personalizada.
   assert.equal(by.integridade.estado, 'medido');
-  for (const id of ['adaptabilidade', 'comparabilidade', 'confiabilidade']) {
-    assert.equal(by[id].estado, 'nao_medido', id);
-    assert.deepEqual(by[id].indicadores, []);
-  }
+  assert.equal(by.confiabilidade.estado, 'medido');
+  assert.deepEqual(by.confiabilidade.indicadores.map((i) => [i.id, i.valorPct, i.numerador, i.denominador]), [['regras_dq', 50, 1, 2]]);
+  assert.equal(by.adaptabilidade.estado, 'nao_medido');
+  assert.deepEqual(by.adaptabilidade.indicadores, []);
+  assert.deepEqual(by.adaptabilidade.medicao.map((m) => m.recurso), [
+    'BigQuery — tabela de controle',
+    'Dataplex — regras de qualidade (ADAPTABILIDADE)',
+  ]);
+
+  // Comparabilidade: regras marcadas com a dimensão + termos de glossário vinculados.
+  assert.deepEqual(by.comparabilidade.indicadores.map((i) => [i.id, i.valorPct, i.numerador, i.denominador]), [
+    ['regras_dq', 100, 1, 1],
+    ['tabelas_com_termo_de_glossario', 50, 2, 4],
+  ]);
+  assert.ok(by.comparabilidade.evidencias.some((e) => e.rotulo === 'Termos de glossário distintos vinculados' && e.valor === '3'));
+  assert.equal(by.comparabilidade.porRegrasPersonalizadas, false);
 
   // Acessibilidade e relevância: indicadores parciais vindos dos aspectos do Knowledge Catalog.
   assert.deepEqual(by.acessibilidade.indicadores, [
@@ -171,15 +244,17 @@ test('relatório das 12 dimensões (dados de demonstração)', () => {
     { rotulo: 'Tabelas sem métrica de uso informada pelo catálogo', valor: '1 de 4' },
   ]);
   assert.ok(by.clareza.evidencias.some((e) => e.rotulo.includes('aspecto overview') && e.valor === '2 de 4'));
-  assert.ok(by.tempestividade.evidencias.every((e) => e.rotulo.startsWith('Última modificação')));
+  assert.deepEqual(by.tempestividade.evidencias[0], { rotulo: 'Regras: execução mais recente', valor: demoData.DEMO_TIME });
+  assert.ok(by.tempestividade.evidencias.slice(1).every((e) => e.rotulo.startsWith('Última modificação')));
 
   // Dimensão sem coletor medida por regras personalizadas: o limite informado é o do indicador.
   assert.equal(by.integridade.coleta, 'declaratoria');
   assert.equal(by.integridade.porRegrasPersonalizadas, true);
   assert.match(by.integridade.lacuna, /^Reflete apenas as regras que a instituição marcou/);
   assert.equal(by.acuracia.porRegrasPersonalizadas, false);
-  assert.equal(by.confiabilidade.porRegrasPersonalizadas, false);
-  assert.match(by.confiabilidade.lacuna, /^Sem coleta automática nesta versão/);
+  assert.equal(by.confiabilidade.porRegrasPersonalizadas, true);
+  assert.equal(by.adaptabilidade.porRegrasPersonalizadas, false);
+  assert.match(by.adaptabilidade.lacuna, /^Não há regras marcadas com a dimensão ADAPTABILIDADE/);
 
   const clareza = by.clareza.indicadores.find((i) => i.id === 'colunas_descritas');
   assert.equal(clareza.numerador, 9);
@@ -190,15 +265,73 @@ test('relatório das 12 dimensões (dados de demonstração)', () => {
   assert.equal(rastreio.numerador, 3);
   assert.equal(rastreio.denominador, 4);
 
-  assert.deepEqual(report.resumo, { medidas: 9, semDados: 0, naoMedidas: 3 });
+  assert.deepEqual(report.resumo, { medidas: 11, semDados: 0, naoMedidas: 1 });
   assert.deepEqual(report.regrasSemMapeamento, []);
+});
+
+test('regras de DataScans executados em datas diferentes: a evidência mostra as duas datas', () => {
+  const rule = (executionTime) => ({ dqDimension: 'CONFIABILIDADE', executed: true, passed: true, executionTime });
+  const report = buildDimensionReport({ rules: [rule('2026-03-01T10:00:00.000Z'), rule('2025-01-22T13:53:22.000Z')] });
+  const confiabilidade = report.dimensoes.find((d) => d.id === 'confiabilidade');
+  assert.deepEqual(confiabilidade.evidencias, [
+    { rotulo: 'Regras: execução mais recente', valor: '2026-03-01T10:00:00.000Z' },
+    { rotulo: 'Regras: execução mais antiga', valor: '2025-01-22T13:53:22.000Z' },
+  ]);
+});
+
+test('glossário: vínculos de definição por tabela e por coluna; tabela não lida fica fora do indicador', () => {
+  const link = (type, path, term) => ({
+    entryLinkType: `projects/655216118709/locations/global/entryLinkTypes/${type}`,
+    entryReferences: [
+      { name: 'projects/1/locations/us/entryGroups/@bigquery/entries/x', type: 'SOURCE', ...(path ? { path } : {}) },
+      { name: `projects/1/locations/global/entryGroups/@dataplex/entries/projects/1/locations/global/glossaries/g/terms/${term}`, type: 'TARGET' },
+    ],
+  });
+  assert.deepEqual(
+    glossaryFactsFromLinks({
+      entryLinks: [
+        link('definition', 'Schema.valor_saldo', 'saldo-devedor'),
+        link('definition', 'Schema.data_base', 'data-base'),
+        link('definition', null, 'saldo-devedor'),
+        link('packages', null, 'nao-e-termo'), // produto de dados: não é vínculo de glossário
+      ],
+      nextPageToken: 'abc',
+    }),
+    { termLinks: 3, terms: ['data-base', 'saldo-devedor'], columns: ['data_base', 'valor_saldo'], tableLevel: true, truncated: true }
+  );
+  assert.deepEqual(glossaryFactsFromLinks({}), { termLinks: 0, terms: [], columns: [], tableLevel: false, truncated: false });
+
+  const facts = { contactsCount: 0, hasOverview: false, queries30d: null, usageRefreshTime: null };
+  const entry = (key, glossary) => ({ key, found: true, facts, ...(glossary ? { glossary } : {}) });
+  const report = buildDimensionReport({
+    catalog: [
+      entry('d.a', glossaryFactsFromLinks({ entryLinks: [link('definition', 'Schema.c', 't1')] })),
+      entry('d.b', glossaryFactsFromLinks({})),
+      entry('d.c', null), // lookupEntryLinks falhou para esta tabela
+    ],
+  });
+  const comparabilidade = report.dimensoes.find((d) => d.id === 'comparabilidade');
+  assert.equal(comparabilidade.estado, 'medido');
+  assert.deepEqual(comparabilidade.indicadores, [
+    {
+      id: 'tabelas_com_termo_de_glossario',
+      rotulo: 'Tabelas do escopo com termo de glossário vinculado (Knowledge Catalog)',
+      valorPct: 50,
+      numerador: 1,
+      denominador: 2,
+      unidade: 'tabelas',
+    },
+  ]);
+  // Nenhum vínculo lido: a dimensão fica sem dados, não com zero.
+  const semLeitura = buildDimensionReport({ catalog: [entry('d.c', null)] });
+  assert.equal(semLeitura.dimensoes.find((d) => d.id === 'comparabilidade').estado, 'sem_dados');
 });
 
 test('sem entradas do catálogo lidas, acessibilidade e relevância ficam sem dados (não zeradas)', () => {
   const notFound = [{ key: 'd.t', dataset: 'd', table: 't', found: false, error: 'PERMISSION_DENIED' }];
   const report = buildDimensionReport({ catalog: notFound });
   const by = Object.fromEntries(report.dimensoes.map((d) => [d.id, d]));
-  for (const id of ['acessibilidade', 'relevancia']) {
+  for (const id of ['acessibilidade', 'comparabilidade', 'relevancia']) {
     assert.equal(by[id].estado, 'sem_dados', id);
     assert.deepEqual(by[id].indicadores, [], id);
   }
@@ -219,20 +352,69 @@ test('dimensão Dataplex desconhecida é reportada como sem mapeamento', () => {
   assert.equal(report.resumo.medidas, 0);
 });
 
-test('visão de qualidade por tabela: scores nulos e situação factual', () => {
+test('visão de qualidade por tabela: regras de todas as dimensões, scores nulos e situação factual', () => {
   const rules = demoData.demoScans(PROJECT).flatMap(rulesFromScan);
   const view = buildQualityView(rules);
+
+  // Só aparecem as dimensões com regras, na ordem dos incisos — inclusive as personalizadas.
+  assert.deepEqual(
+    view.dimensionGroups.map((g) => [g.id, g.inciso, g.scorePct, g.rulesPassed, g.rulesEvaluated, g.rulesNotExecuted]),
+    [
+      ['acuracia', 'II', 66.67, 2, 3, 1],
+      ['comparabilidade', 'V', 100, 1, 1, 0],
+      ['completude', 'VI', 100, 3, 3, 1],
+      ['confiabilidade', 'VII', 50, 1, 2, 0],
+      ['consistencia', 'VIII', 66.67, 2, 3, 0],
+      ['integridade', 'IX', 100, 1, 1, 0],
+      ['tempestividade', 'XII', 100, 1, 1, 0],
+    ]
+  );
+  assert.equal(view.dimensionGroups.reduce((n, g) => n + g.rules.length, 0), rules.length);
+  assert.deepEqual(view.dimensionGroups[0].dqDimensions, ['ACCURACY', 'VALIDITY']);
+  assert.deepEqual(view.unmappedRules, []);
+  assert.equal(view.otherRulesCount, 0);
+
+  const revisao = view.dimensionGroups.find((g) => g.id === 'confiabilidade').rules[0];
+  assert.equal(revisao.ruleName, 'revisao-sem-desvio-relevante');
+  assert.match(revisao.description, /snapshot da remessa/);
+  assert.equal(revisao.resultKind, 'assercao');
+  assert.equal(revisao.assertionRowCount, 3);
+  assert.equal(revisao.passed, false);
+  assert.equal(revisao.dimensionName, 'Confiabilidade');
+  const moeda = view.dimensionGroups.find((g) => g.id === 'comparabilidade').rules[0];
+  assert.equal(moeda.assertionRowCount, 0);
+  assert.equal(moeda.passed, true);
+
   const credito = view.tableSummaries.find((t) => t.fullTableName === 'fin_demo_credito.operacoes_ativas');
   assert.equal(credito.status, 'Sem execução');
   assert.equal(credito.overallScore, null);
-  assert.equal(credito.accuracyScore, null);
+  assert.deepEqual(credito.dimensionScores.map((d) => [d.id, d.scorePct, d.rulesNotExecuted]), [
+    ['acuracia', null, 1],
+    ['completude', null, 1],
+  ]);
   const cartoes = view.tableSummaries.find((t) => t.fullTableName === 'fin_demo_cartoes.transacao_cartao');
   assert.equal(cartoes.status, 'Com falhas');
   assert.equal(cartoes.overallScore, 75);
-  const notExecuted = view.dimensions.accuracy.rules.find((r) => r.executed === false);
+  const contas = view.tableSummaries.find((t) => t.fullTableName === 'fin_demo_contas.saldos_extratos');
+  assert.deepEqual(contas.dimensionScores.map((d) => [d.inciso, d.scorePct]), [['V', 100], ['VII', 50], ['VIII', 100], ['IX', 100]]);
+  const notExecuted = view.dimensionGroups[0].rules.find((r) => r.executed === false);
   assert.equal(notExecuted.passed, null);
   assert.equal(notExecuted.passPercentage, null);
   assert.equal(tablesFromRules(rules).length, 4);
+});
+
+test('visão de qualidade por tabela: dimensão de DataScan sem correspondência fica à parte', () => {
+  const base = { tableKey: 'd.t', dataset: 'd', table: 't', ruleType: 'Regra', executed: true, passed: true, evaluatedCount: null, passedCount: null, passRatio: null };
+  const view = buildQualityView([
+    { ...base, dqDimension: 'MINHA_DIMENSAO', ruleName: 'r1' },
+    { ...base, dqDimension: 'ADAPTABILIDADE', ruleName: 'r2' },
+  ]);
+  assert.deepEqual(view.dimensionGroups.map((g) => g.id), ['adaptabilidade']);
+  assert.deepEqual(view.unmappedRules.map((r) => [r.ruleName, r.dimension, r.dimensionId]), [['r1', 'MINHA_DIMENSAO', null]]);
+  assert.equal(view.otherRulesCount, 1);
+  // A regra sem correspondência continua no total da tabela, mas fora dos scores por dimensão.
+  assert.equal(view.tableSummaries[0].totalRules, 2);
+  assert.deepEqual(view.tableSummaries[0].dimensionScores.map((d) => d.id), ['adaptabilidade']);
 });
 
 test('linhagem: sem origem registrada não é tratada como conforme', () => {
@@ -440,10 +622,19 @@ test('rotas: demonstração, projeto sem escopo e falha de API — sem dados pre
       assert.deepEqual(body.diagnostics, [], name);
     }
     assert.equal(demo.dimensions.dimensoes.length, 12);
-    assert.deepEqual(demo.dimensions.resumo, { medidas: 9, semDados: 0, naoMedidas: 3 });
+    assert.deepEqual(demo.dimensions.resumo, { medidas: 11, semDados: 0, naoMedidas: 1 });
     assert.equal(demo.dimensions.escopo.tabelas.length, 4);
+    assert.ok(demo.dimensions.dimensoes.every((d) => d.medicao.length > 0));
+    assert.deepEqual(
+      demo.dataQuality.dimensionGroups.map((g) => g.id),
+      ['acuracia', 'comparabilidade', 'completude', 'confiabilidade', 'consistencia', 'integridade', 'tempestividade']
+    );
+    assert.equal('dimensions' in demo.dataQuality, false);
     assert.equal(demo.dataQuality.centralizedCatalogContext.length, 4);
     assert.equal(demo.dataQuality.centralizedCatalogContext[0].contactsCount, 2);
+    assert.equal(demo.dataQuality.centralizedCatalogContext[0].glossaryTermLinks, 2);
+    assert.deepEqual(demo.dataQuality.centralizedCatalogContext[0].glossaryTerms, ['cliente', 'cpf']);
+    assert.equal(demo.dataQuality.centralizedCatalogContext[1].glossaryTermLinks, 0);
     assert.equal(demo.dataQuality.lookupContextYaml, null);
     assert.equal(demo.lineage.summary.traceabilityCoveragePct, 75);
     assert.equal(demo.sensitive.perfisSensitiveDataProtection.consultado, false);
@@ -462,10 +653,10 @@ test('rotas: demonstração, projeto sem escopo e falha de API — sem dados pre
       assert.equal(body.demo, false, name);
       assert.equal(body.identityMode, 'user', name);
     }
-    assert.deepEqual(vazio.dimensions.resumo, { medidas: 0, semDados: 8, naoMedidas: 4 });
+    assert.deepEqual(vazio.dimensions.resumo, { medidas: 0, semDados: 9, naoMedidas: 3 });
     assert.ok(vazio.dimensions.dimensoes.every((d) => d.indicadores.length === 0));
     assert.deepEqual(vazio.dimensions.escopo.tabelas, []);
-    assert.equal(vazio.dataQuality.dimensions.accuracy.scorePct, null);
+    assert.deepEqual(vazio.dataQuality.dimensionGroups, []);
     assert.deepEqual(vazio.dataQuality.tableSummaries, []);
     assert.equal(vazio.lineage.summary.traceabilityCoveragePct, null);
     assert.equal(vazio.sensitive.summary.overallProtectionCoveragePct, null);

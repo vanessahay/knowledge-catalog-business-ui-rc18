@@ -17,6 +17,12 @@ export interface Rc18Evidence {
   valor: string;
 }
 
+/** Recurso do Google Cloud com que a instituição produz a evidência de uma dimensão. */
+export interface Rc18Medicao {
+  recurso: string;
+  acao: string;
+}
+
 export type Rc18Estado = 'medido' | 'sem_dados' | 'nao_medido';
 export type Rc18Coleta = 'automatica' | 'parcial' | 'declaratoria';
 
@@ -41,7 +47,80 @@ export interface Rc18Dimension {
   lacuna: string;
   /** Dimensão sem coletor próprio, medida só por regras marcadas com a dimensão personalizada. */
   porRegrasPersonalizadas?: boolean;
+  medicao?: Rc18Medicao[];
   evidencias: Rc18Evidence[];
+}
+
+/**
+ * Forma do resultado de uma regra de DataScan:
+ *   'linhas'   -> a API devolve linhas avaliadas e aprovadas;
+ *   'agregada' -> condição sobre a tabela inteira (só aprovada/reprovada);
+ *   'assercao' -> consulta que lista o que está em desacordo (quantidade de linhas retornadas).
+ */
+export type Rc18ResultKind = 'linhas' | 'agregada' | 'assercao' | null;
+
+export interface Rc18Rule {
+  ruleName: string;
+  description: string | null;
+  column: string;
+  table: string;
+  dataset?: string;
+  tableKey: string;
+  scanId?: string | null;
+  executed?: boolean;
+  passed: boolean | null;
+  resultKind: Rc18ResultKind;
+  evaluatedCount: number | null;
+  passedCount: number | null;
+  failedCount: number | null;
+  passPercentage: number | null;
+  assertionRowCount: number | null;
+  /** Dimensão do DataScan (como configurada na regra). */
+  dimension: string;
+  /** Dimensão da Resolução a que a regra foi atribuída; `null` quando não há correspondência. */
+  dimensionId: string | null;
+  dimensionName: string | null;
+  inciso: string | null;
+  ruleType?: string;
+  executionTime?: string | null;
+}
+
+export interface Rc18DimensionGroup {
+  id: string;
+  inciso: string;
+  name: string;
+  group: string;
+  dqDimensions: string[];
+  scorePct: number | null;
+  rulesEvaluated: number;
+  rulesPassed: number;
+  rulesFailed: number;
+  rulesNotExecuted: number;
+  rules: Rc18Rule[];
+}
+
+export interface Rc18TableDimensionScore {
+  id: string;
+  inciso: string;
+  name: string;
+  scorePct: number | null;
+  rulesEvaluated: number;
+  rulesPassed: number;
+  rulesNotExecuted: number;
+}
+
+export interface Rc18TableSummary {
+  dataset: string;
+  table: string;
+  fullTableName: string;
+  totalRules: number;
+  passedRules: number;
+  failedRules: number;
+  notExecutedRules?: number;
+  overallScore: number | null;
+  dimensionScores: Rc18TableDimensionScore[];
+  lastExecutionTime?: string | null;
+  status: 'Sem falhas' | 'Com falhas' | 'Sem execução';
 }
 
 export interface Rc18Diagnostic {
@@ -100,6 +179,22 @@ export const formatCount = (value: number | null | undefined): string =>
 export const formatEvidenceValue = (value: string): string => {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?Z$/.exec(value);
   return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]} UTC` : value;
+};
+
+/**
+ * Resultado de uma regra, em texto, só com o que a API devolve para a forma da regra.
+ * Regra sem execução (ou de forma desconhecida e sem contagem) fica "—".
+ */
+export const ruleResultText = (rule: Rc18Rule): string => {
+  if (rule.executed === false || rule.passed === null) return '—';
+  if (rule.resultKind === 'assercao') {
+    if (rule.assertionRowCount === null) return '—';
+    if (rule.assertionRowCount === 0) return 'Nenhuma linha em desacordo';
+    return `${formatCount(rule.assertionRowCount)} ${rule.assertionRowCount === 1 ? 'linha' : 'linhas'} em desacordo`;
+  }
+  if (rule.resultKind === 'agregada') return rule.passed ? 'Condição atendida' : 'Condição não atendida';
+  if (rule.evaluatedCount === null || rule.passedCount === null) return '—';
+  return `${formatCount(rule.passedCount)} de ${formatCount(rule.evaluatedCount)} linhas (${formatPct(rule.passPercentage)})`;
 };
 
 /** Data ISO (AAAA-MM-DD) em DD/MM/AAAA. */

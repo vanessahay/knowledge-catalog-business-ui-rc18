@@ -1,7 +1,15 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import RC18DimensionsOverview from './RC18DimensionsOverview';
-import { type Rc18Dimension, type Rc18DimensionsReport, formatCount, formatEvidenceValue, formatPct } from './rc18Types';
+import {
+  type Rc18Dimension,
+  type Rc18DimensionsReport,
+  type Rc18Rule,
+  formatCount,
+  formatEvidenceValue,
+  formatPct,
+  ruleResultText,
+} from './rc18Types';
 
 const NOMES = [
   ['acessibilidade', 'I', 'Acessibilidade'],
@@ -31,6 +39,7 @@ const baseDimension = (id: string, inciso: string, nome: string): Rc18Dimension 
   fontes: [],
   comoEMedido: null,
   lacuna: `Sem coleta automática para ${nome}.`,
+  medicao: [{ recurso: `Recurso de ${nome}`, acao: `Como medir ${nome}.` }],
   evidencias: [],
 });
 
@@ -89,6 +98,10 @@ describe('RC18DimensionsOverview', () => {
     expect(within(card).getByText('Não medido automaticamente')).toBeInTheDocument();
     expect(within(card).getByText('Sem coleta automática para Confiabilidade.')).toBeInTheDocument();
     expect(within(card).queryByText(/%/)).toBeNull();
+    // Sem indicador, a orientação de como medir já aparece aberta — e não há atalho para regras.
+    expect(within(card).getByText('Recurso de Confiabilidade:')).toBeInTheDocument();
+    expect(within(card).getByText('Como medir Confiabilidade.')).toBeInTheDocument();
+    expect(within(card).queryByRole('button', { name: /Ver as/ })).toBeNull();
   });
 
   it('dimensão medida exibe o indicador com numerador e denominador', () => {
@@ -108,6 +121,25 @@ describe('RC18DimensionsOverview', () => {
     expect(within(card).getByText('63 de 68 regras — Regras aprovadas')).toBeInTheDocument();
     expect(within(card).getByText('2 regra(s) configurada(s) sem execução — fora do cálculo.')).toBeInTheDocument();
     expect(within(card).getByText('Medido')).toBeInTheDocument();
+    // Dimensão medida: a orientação fica recolhida até ser pedida.
+    expect(within(card).queryByText('Recurso de Acurácia:')).toBeNull();
+    fireEvent.click(within(card).getByRole('button', { name: 'Como medir no Google Cloud' }));
+    expect(within(card).getByText('Recurso de Acurácia:')).toBeInTheDocument();
+  });
+
+  it('dimensão com regras oferece o atalho para a lista de regras', () => {
+    const onShowRules = vi.fn();
+    const report = buildReport({
+      integridade: {
+        estado: 'medido',
+        porRegrasPersonalizadas: true,
+        indicadores: [{ id: 'regras_dq', rotulo: 'Regras aprovadas', valorPct: 33.33, numerador: 1, denominador: 3, unidade: 'regras' }],
+        regras: { total: 3, executadas: 3, aprovadas: 1, reprovadas: 2, naoExecutadas: 0 },
+      },
+    });
+    render(<RC18DimensionsOverview report={report} onShowRules={onShowRules} />);
+    fireEvent.click(within(screen.getByTestId('rc18-dimensao-integridade')).getByRole('button', { name: 'Ver as 3 regra(s) desta dimensão' }));
+    expect(onShowRules).toHaveBeenCalledWith('integridade');
   });
 
   it('avisa quando não há escopo e não atesta conformidade', () => {
@@ -127,5 +159,38 @@ describe('RC18DimensionsOverview', () => {
     expect(formatCount(1234)).toBe('1.234');
     expect(formatEvidenceValue('2026-01-15T08:03:36.000Z')).toBe('15/01/2026 08:03 UTC');
     expect(formatEvidenceValue('3 de 4')).toBe('3 de 4');
+  });
+
+  it('resultado da regra: só o que a API devolve para cada forma de regra', () => {
+    const rule = (overrides: Partial<Rc18Rule>): Rc18Rule => ({
+      ruleName: 'regra',
+      description: null,
+      column: '—',
+      table: 't',
+      tableKey: 'd.t',
+      executed: true,
+      passed: true,
+      resultKind: 'linhas',
+      evaluatedCount: null,
+      passedCount: null,
+      failedCount: null,
+      passPercentage: null,
+      assertionRowCount: null,
+      dimension: 'VALIDITY',
+      dimensionId: 'acuracia',
+      dimensionName: 'Acurácia',
+      inciso: 'II',
+      ...overrides,
+    });
+    expect(ruleResultText(rule({ evaluatedCount: 600, passedCount: 599, passPercentage: 99.83, passed: false }))).toBe('599 de 600 linhas (99,83%)');
+    expect(ruleResultText(rule({ resultKind: 'assercao', assertionRowCount: 0 }))).toBe('Nenhuma linha em desacordo');
+    expect(ruleResultText(rule({ resultKind: 'assercao', assertionRowCount: 1, passed: false }))).toBe('1 linha em desacordo');
+    expect(ruleResultText(rule({ resultKind: 'assercao', assertionRowCount: 12, passed: false }))).toBe('12 linhas em desacordo');
+    expect(ruleResultText(rule({ resultKind: 'agregada' }))).toBe('Condição atendida');
+    expect(ruleResultText(rule({ resultKind: 'agregada', passed: false }))).toBe('Condição não atendida');
+    // Sem execução, sem contagem ou forma desconhecida: nada é presumido.
+    expect(ruleResultText(rule({ executed: false, passed: null }))).toBe('—');
+    expect(ruleResultText(rule({ resultKind: 'assercao', assertionRowCount: null, passed: false }))).toBe('—');
+    expect(ruleResultText(rule({ resultKind: null }))).toBe('—');
   });
 });

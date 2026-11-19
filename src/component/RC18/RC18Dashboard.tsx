@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   Box,
   Card,
-  CardContent,
   Typography,
   Grid,
   Chip,
@@ -24,7 +23,6 @@ import {
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import WarningIcon from '@mui/icons-material/Warning';
-import RemoveCircleOutlineIcon from '@mui/icons-material/RemoveCircleOutline';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DownloadIcon from '@mui/icons-material/Download';
 import StorageIcon from '@mui/icons-material/Storage';
@@ -42,50 +40,16 @@ import axios from 'axios';
 import { useAuth } from '../../auth/AuthProvider';
 import { URLS } from '../../constants/urls';
 import RC18DimensionsOverview from './RC18DimensionsOverview';
-import { type Rc18DimensionsReport, type Rc18Diagnostic, formatCount, formatPct } from './rc18Types';
-
-interface RuleDetail {
-  ruleName: string;
-  column: string;
-  table: string;
-  dataset?: string;
-  executed?: boolean;
-  passed: boolean | null;
-  evaluatedCount: number | null;
-  passedCount: number | null;
-  failedCount: number | null;
-  passPercentage: number | null;
-  dimension: string;
-  description?: string;
-  executionTime?: string;
-}
-
-interface DimensionData {
-  name: string;
-  group: string;
-  scorePct: number | null;
-  rulesEvaluated: number;
-  rulesPassed: number;
-  rules: RuleDetail[];
-  description: string;
-  productGcp?: string;
-}
-
-interface TableSummary {
-  dataset: string;
-  table: string;
-  fullTableName: string;
-  totalRules: number;
-  passedRules: number;
-  failedRules: number;
-  notExecutedRules?: number;
-  accuracyScore: number | null;
-  completenessScore: number | null;
-  consistencyScore: number | null;
-  overallScore: number | null;
-  lastExecutionTime?: string;
-  status: 'Sem falhas' | 'Com falhas' | 'Sem execução';
-}
+import RC18QualityByTable from './RC18QualityByTable';
+import {
+  type Rc18DimensionGroup,
+  type Rc18DimensionsReport,
+  type Rc18Diagnostic,
+  type Rc18Rule,
+  type Rc18TableSummary,
+  formatCount,
+  formatPct,
+} from './rc18Types';
 
 interface CatalogContextItem {
   entryId: string;
@@ -99,6 +63,10 @@ interface CatalogContextItem {
   contactsCount?: number | null;
   hasOverview?: boolean | null;
   queries30d?: number | null;
+  /** `null` = vínculos não lidos; número = vínculos com termos de glossário (até 10 lidos). */
+  glossaryTermLinks?: number | null;
+  glossaryTerms?: string[];
+  glossaryLinksTruncated?: boolean;
   found?: boolean;
   error?: string | null;
   governanceDomain: string;
@@ -256,14 +224,12 @@ interface RC18Response {
   timestamp: string;
   dataset?: string;
   table?: string;
-  dimensions: {
-    accuracy: DimensionData;
-    completeness: DimensionData;
-    consistency: DimensionData;
-  };
+  /** Regras agrupadas pela dimensão da Resolução (só dimensões com regras). */
+  dimensionGroups?: Rc18DimensionGroup[];
+  unmappedRules?: Rc18Rule[];
   scannedTables?: string[];
   scannedSourceTables?: string[];
-  tableSummaries?: TableSummary[];
+  tableSummaries?: Rc18TableSummary[];
   centralizedCatalogContext?: CatalogContextItem[];
   lookupContextYaml?: string | null;
   totalScansFound?: number;
@@ -300,7 +266,8 @@ const RC18Dashboard: React.FC = () => {
   const [dimsData, setDimsData] = useState<Rc18DimensionsReport | null>(null);
   // Dados sintéticos só aparecem quando o usuário pede explicitamente.
   const [demoMode, setDemoMode] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<number>(0);
+  // Dimensão escolhida no filtro de regras da visão "Qualidade por tabela" ('' = todas).
+  const [rulesDimension, setRulesDimension] = useState<string>('');
   const [dlpTab, setDlpTab] = useState<number>(0);
   const [lineageTab, setLineageTab] = useState<number>(0);
   const [viewMode, setViewMode] = useState<'dimensions' | 'by_table' | 'dlp_privacy' | 'lineage_traceability' | 'centralized'>('dimensions');
@@ -356,11 +323,7 @@ const RC18Dashboard: React.FC = () => {
     fetchFrameworkData(selectedLocation, next);
   };
 
-  const accuracy = data?.dimensions?.accuracy;
-  const completeness = data?.dimensions?.completeness;
-  const consistency = data?.dimensions?.consistency;
-
-  const tableSummariesList: TableSummary[] = data?.tableSummaries ?? [];
+  const tableSummariesList: Rc18TableSummary[] = data?.tableSummaries ?? [];
   const centralizedContextList: CatalogContextItem[] = data?.centralizedCatalogContext ?? [];
 
   const isDemo = !!(dimsData?.demo ?? data?.demo);
@@ -403,46 +366,6 @@ const RC18Dashboard: React.FC = () => {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-  };
-
-  const scoreColor = (v: number | null | undefined) =>
-    v === null || v === undefined ? '#5F6368' : v === 100 ? '#137333' : '#B06000';
-
-  // Selo dos cartões: neutro quando não há execução (nunca presume aprovação nem falha).
-  const renderScoreBadge = (v: number | null | undefined) => {
-    const none = v === null || v === undefined;
-    return (
-      <Box
-        sx={{
-          width: '56px',
-          height: '56px',
-          borderRadius: '50%',
-          backgroundColor: none ? '#F1F3F4' : v === 100 ? '#E6F4EA' : '#FEF7E0',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}
-      >
-        {none ? (
-          <RemoveCircleOutlineIcon sx={{ color: '#5F6368', fontSize: 32 }} />
-        ) : v === 100 ? (
-          <CheckCircleIcon sx={{ color: '#137333', fontSize: 32 }} />
-        ) : (
-          <WarningIcon sx={{ color: '#B06000', fontSize: 32 }} />
-        )}
-      </Box>
-    );
-  };
-
-  const renderRuleStatus = (rule: RuleDetail) => {
-    if (rule.executed === false || rule.passed === null) {
-      return <Chip label="Sem execução" size="small" variant="outlined" />;
-    }
-    return rule.passed ? (
-      <Chip icon={<CheckCircleIcon />} label="Aprovada" color="success" size="small" />
-    ) : (
-      <Chip icon={<WarningIcon />} label="Reprovada" color="error" size="small" />
-    );
   };
 
   return (
@@ -731,7 +654,15 @@ const RC18Dashboard: React.FC = () => {
             </Alert>
           )}
 
-          {viewMode === 'dimensions' && dimsData && <RC18DimensionsOverview report={dimsData} />}
+          {viewMode === 'dimensions' && dimsData && (
+            <RC18DimensionsOverview
+              report={dimsData}
+              onShowRules={(dimensionId) => {
+                setRulesDimension(dimensionId);
+                setViewMode('by_table');
+              }}
+            />
+          )}
 
           {/* VISÃO 2: CLASSIFICAÇÃO DE DADOS SENSÍVEIS E SIGILO BANCÁRIO (Cloud DLP / LGPD) */}
           {viewMode === 'dlp_privacy' && (
@@ -1372,9 +1303,10 @@ const RC18Dashboard: React.FC = () => {
                     Entradas do Knowledge Catalog das tabelas do escopo
                   </Typography>
                   <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                    Aspectos lidos com GetEntry (contatos, documentação, uso e scorecard); regras de qualidade vindas dos
-                    DataScans. Contatos alimentam o indicador de acessibilidade (inciso I) e as consultas, o de relevância
-                    (inciso XI).
+                    Aspectos lidos com GetEntry (contatos, documentação, uso e scorecard), vínculos com termos de glossário
+                    (lookupEntryLinks) e regras de qualidade vindas dos DataScans. Contatos alimentam o indicador de
+                    acessibilidade (inciso I); termos de glossário, o de comparabilidade (inciso V); consultas, o de
+                    relevância (inciso XI).
                   </Typography>
                 </Box>
                 <TableContainer>
@@ -1384,6 +1316,7 @@ const RC18Dashboard: React.FC = () => {
                         <TableCell sx={{ fontWeight: 700 }}>Entrada (tabela • dataset)</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Aspectos na entrada</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Contatos</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Termos de glossário</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Consultas (30 dias)</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Regras aprovadas (%)</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>Regras de qualidade</TableCell>
@@ -1422,6 +1355,21 @@ const RC18Dashboard: React.FC = () => {
                             </Box>
                           </TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>{item.found === false ? '—' : formatCount(item.contactsCount)}</TableCell>
+                          <TableCell sx={{ fontWeight: 600 }}>
+                            {item.found === false || item.glossaryTermLinks === null || item.glossaryTermLinks === undefined ? (
+                              'não lido'
+                            ) : (
+                              <>
+                                {formatCount(item.glossaryTermLinks)}
+                                {item.glossaryLinksTruncated ? ' ou mais' : ''}
+                                {(item.glossaryTerms ?? []).length > 0 && (
+                                  <Typography variant="caption" sx={{ display: 'block', color: '#5F6368', fontWeight: 400, overflowWrap: 'anywhere' }}>
+                                    {(item.glossaryTerms ?? []).join(', ')}
+                                  </Typography>
+                                )}
+                              </>
+                            )}
+                          </TableCell>
                           <TableCell sx={{ fontWeight: 600 }}>
                             {item.found === false ? '—' : item.queries30d === null || item.queries30d === undefined ? 'não informado' : formatCount(item.queries30d)}
                           </TableCell>
@@ -1475,326 +1423,15 @@ const RC18Dashboard: React.FC = () => {
             </Box>
           )}
 
-          {/* VISÃO 2: VISÃO DE QUALIDADE DE DADOS POR TABELA */}
+          {/* Qualidade por tabela: regras de todos os DataScans, por dimensão da Resolução */}
           {viewMode === 'by_table' && (
-            <Box>
-              {tableSummariesList.length === 0 && (
-                <Alert severity="info" sx={{ marginBottom: '20px', borderRadius: '8px' }}>
-                  Nenhum DataScan de qualidade de dados encontrado para este projeto e localização.
-                </Alert>
-              )}
-              {/* Executive Overview Cards for Dimensions 1, 2 & 3 */}
-              <Grid container spacing={3} sx={{ marginBottom: '32px' }}>
-                {/* Dimensão 1: Acurácia */}
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <Card
-                    sx={{
-                      borderRadius: '16px',
-                      border: '1px solid #E0E0E0',
-                      boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
-                      transition: 'all 0.2s ease-in-out',
-                      '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }
-                    }}
-                  >
-                    <CardContent sx={{ padding: '24px' }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <Box>
-                          <Chip
-                            label="Inciso II • art. 2º, § 2º"
-                            size="small"
-                            sx={{ backgroundColor: '#E8F0FE', color: '#1A73E8', fontWeight: 600, marginBottom: '8px' }}
-                          />
-                          <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
-                            Acurácia
-                          </Typography>
-                        </Box>
-                        {renderScoreBadge(accuracy?.scorePct)}
-                      </Box>
-
-                      <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
-                        {formatPct(accuracy?.scorePct)}
-                      </Typography>
-
-                      <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
-                        {accuracy?.description}
-                      </Typography>
-
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
-                        <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                          Regras aprovadas:
-                        </Typography>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#1F1F1F' }}>
-                          {accuracy?.rulesPassed ?? 0} / {accuracy?.rulesEvaluated ?? 0}
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                {/* Dimensão 2: Completude */}
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <Card
-                    sx={{
-                      borderRadius: '16px',
-                      border: '1px solid #E0E0E0',
-                      boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
-                      transition: 'all 0.2s ease-in-out',
-                      '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }
-                    }}
-                  >
-                    <CardContent sx={{ padding: '24px' }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <Box>
-                          <Chip
-                            label="Inciso VI • art. 2º, § 2º"
-                            size="small"
-                            sx={{ backgroundColor: '#E6F4EA', color: '#137333', fontWeight: 600, marginBottom: '8px' }}
-                          />
-                          <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
-                            Completude
-                          </Typography>
-                        </Box>
-                        {renderScoreBadge(completeness?.scorePct)}
-                      </Box>
-
-                      <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
-                        {formatPct(completeness?.scorePct)}
-                      </Typography>
-
-                      <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
-                        {completeness?.description}
-                      </Typography>
-
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
-                        <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                          Regras aprovadas:
-                        </Typography>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#1F1F1F' }}>
-                          {completeness?.rulesPassed ?? 0} / {completeness?.rulesEvaluated ?? 0}
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-
-                {/* Dimensão 3: Consistência */}
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <Card
-                    sx={{
-                      borderRadius: '16px',
-                      border: '1px solid #E0E0E0',
-                      boxShadow: '0 2px 12px rgba(0,0,0,0.04)',
-                      transition: 'all 0.2s ease-in-out',
-                      '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.08)' }
-                    }}
-                  >
-                    <CardContent sx={{ padding: '24px' }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <Box>
-                          <Chip
-                            label="Inciso VIII • art. 2º, § 2º"
-                            size="small"
-                            sx={{ backgroundColor: '#F3E8FF', color: '#7E22CE', fontWeight: 600, marginBottom: '8px' }}
-                          />
-                          <Typography variant="h5" sx={{ fontWeight: 700, fontFamily: '"Google Sans", sans-serif' }}>
-                            Consistência
-                          </Typography>
-                        </Box>
-                        {renderScoreBadge(consistency?.scorePct)}
-                      </Box>
-
-                      <Typography variant="h3" sx={{ fontWeight: 800, color: '#1F1F1F', marginY: '16px' }}>
-                        {formatPct(consistency?.scorePct)}
-                      </Typography>
-
-                      <Typography variant="body2" sx={{ color: '#5F6368', marginBottom: '16px' }}>
-                        {consistency?.description}
-                      </Typography>
-
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', pt: 2, borderTop: '1px solid #F1F3F4' }}>
-                        <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                          Regras aprovadas:
-                        </Typography>
-                        <Typography variant="caption" sx={{ fontWeight: 700, color: '#1F1F1F' }}>
-                          {consistency?.rulesPassed ?? 0} / {consistency?.rulesEvaluated ?? 0}
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              </Grid>
-
-              {/* Detailed Rules Table with Tabs */}
-              <Paper sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', overflow: 'hidden' }}>
-                <Box sx={{ borderBottom: 1, borderColor: 'divider', backgroundColor: '#FAFAFA', px: 2 }}>
-                  <Tabs
-                    value={activeTab}
-                    onChange={(_, newValue) => setActiveTab(newValue)}
-                    textColor="primary"
-                    indicatorColor="primary"
-                  >
-                    <Tab label="Regras por tabela" sx={{ fontWeight: 700, textTransform: 'none', py: 2 }} />
-                    <Tab label="Acurácia (II)" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
-                    <Tab label="Completude (VI)" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
-                    <Tab label="Consistência (VIII)" sx={{ fontWeight: 600, textTransform: 'none', py: 2 }} />
-                  </Tabs>
-                </Box>
-
-                <Box sx={{ padding: '24px' }}>
-                  {activeTab === 0 && (
-                    <TableContainer>
-                      <Table sx={{ minWidth: 650 }}>
-                        <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 700 }}>Tabela (dataset.tabela)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Acurácia (%)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Completude (%)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Consistência (%)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Regras aprovadas (%)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Regras (Aprovadas/Total)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Situação</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {tableSummariesList.map((ts, idx) => (
-                            <TableRow key={idx} hover>
-                              <TableCell sx={{ fontWeight: 700, color: '#1A73E8' }}>
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                  <TableChartIcon fontSize="small" sx={{ color: '#1A73E8' }} />
-                                  {ts.fullTableName}
-                                </Box>
-                              </TableCell>
-                              <TableCell sx={{ fontWeight: 600, color: scoreColor(ts.accuracyScore) }}>
-                                {formatPct(ts.accuracyScore)}
-                              </TableCell>
-                              <TableCell sx={{ fontWeight: 600, color: scoreColor(ts.completenessScore) }}>
-                                {formatPct(ts.completenessScore)}
-                              </TableCell>
-                              <TableCell sx={{ fontWeight: 600, color: scoreColor(ts.consistencyScore) }}>
-                                {formatPct(ts.consistencyScore)}
-                              </TableCell>
-                              <TableCell sx={{ fontWeight: 800, fontSize: '15px' }}>
-                                {formatPct(ts.overallScore)}
-                              </TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={`${ts.passedRules} / ${ts.totalRules}`}
-                                  size="small"
-                                  variant="outlined"
-                                  sx={{ fontWeight: 600 }}
-                                />
-                              </TableCell>
-                              <TableCell>
-                                {ts.status === 'Sem falhas' ? (
-                                  <Chip icon={<CheckCircleIcon />} label="Sem falhas" color="success" size="small" />
-                                ) : ts.status === 'Com falhas' ? (
-                                  <Chip icon={<WarningIcon />} label="Com falhas" color="warning" size="small" />
-                                ) : (
-                                  <Chip label="Sem execução" size="small" variant="outlined" />
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  )}
-
-                  {activeTab === 1 && (
-                    <TableContainer>
-                      <Table sx={{ minWidth: 650 }}>
-                        <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 700 }}>Nome da Regra</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Coluna</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Linhas aprovadas (%)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {accuracy?.rules?.map((rule, idx) => (
-                            <TableRow key={idx} hover>
-                              <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
-                              <TableCell>{rule.column}</TableCell>
-                              <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
-                              <TableCell>{formatCount(rule.evaluatedCount)}</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>{formatPct(rule.passPercentage)}</TableCell>
-                              <TableCell>
-                                {renderRuleStatus(rule)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  )}
-
-                  {activeTab === 2 && (
-                    <TableContainer>
-                      <Table sx={{ minWidth: 650 }}>
-                        <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 700 }}>Nome da Regra</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Coluna</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Linhas aprovadas (%)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {completeness?.rules?.map((rule, idx) => (
-                            <TableRow key={idx} hover>
-                              <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
-                              <TableCell>{rule.column}</TableCell>
-                              <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
-                              <TableCell>{formatCount(rule.evaluatedCount)}</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>{formatPct(rule.passPercentage)}</TableCell>
-                              <TableCell>
-                                {renderRuleStatus(rule)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  )}
-
-                  {activeTab === 3 && (
-                    <TableContainer>
-                      <Table sx={{ minWidth: 650 }}>
-                        <TableHead sx={{ backgroundColor: '#F8F9FA' }}>
-                          <TableRow>
-                            <TableCell sx={{ fontWeight: 700 }}>Nome da Regra</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Coluna</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Tabela / Entidade</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Registros Avaliados</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Linhas aprovadas (%)</TableCell>
-                            <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {consistency?.rules?.map((rule, idx) => (
-                            <TableRow key={idx} hover>
-                              <TableCell sx={{ fontWeight: 600 }}>{rule.ruleName}</TableCell>
-                              <TableCell>{rule.column}</TableCell>
-                              <TableCell><Chip label={rule.table} size="small" variant="outlined" /></TableCell>
-                              <TableCell>{formatCount(rule.evaluatedCount)}</TableCell>
-                              <TableCell sx={{ fontWeight: 700 }}>{formatPct(rule.passPercentage)}</TableCell>
-                              <TableCell>
-                                {renderRuleStatus(rule)}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  )}
-                </Box>
-              </Paper>
-            </Box>
+            <RC18QualityByTable
+              groups={data?.dimensionGroups ?? []}
+              unmappedRules={data?.unmappedRules ?? []}
+              tables={tableSummariesList}
+              dimensionFilter={rulesDimension}
+              onDimensionFilterChange={setRulesDimension}
+            />
           )}
         </>
       )}

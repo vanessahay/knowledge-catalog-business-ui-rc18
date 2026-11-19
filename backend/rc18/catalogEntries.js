@@ -9,6 +9,7 @@
  *   - overview               -> content, links[]
  *   - usage                  -> metrics[] { name, timeSeries[] { interval, value } }, refreshTime
  *   - data-quality-scorecard -> score, status, dimensions[]
+ * Os vínculos com termos de glossário não são aspectos: vêm de `lookupEntryLinks`.
  * (O aspecto `refresh-cadence` não é lido: ele descreve garantias de produtos de dados, e o
  * escopo deste painel são tabelas.)
  *
@@ -93,6 +94,38 @@ function catalogFactsFromEntry(entry) {
   };
 }
 
+/**
+ * Vínculos de definição (tipo `definition`) entre a entrada de uma tabela e termos de glossário,
+ * a partir da resposta de `lookupEntryLinks`. Um vínculo liga a tabela — ou uma coluna, quando a
+ * referência de origem traz `path: "Schema.<coluna>"` — a um termo.
+ * `truncated` indica que a API tinha mais páginas além da que foi lida.
+ */
+function glossaryFactsFromLinks(response) {
+  const links = (response && Array.isArray(response.entryLinks) ? response.entryLinks : []).filter((l) =>
+    /\/entryLinkTypes\/definition$/.test(String((l && l.entryLinkType) || ''))
+  );
+  const terms = new Set();
+  const columns = new Set();
+  let tableLevel = false;
+  for (const link of links) {
+    const refs = Array.isArray(link.entryReferences) ? link.entryReferences : [];
+    const target = refs.find((r) => r && r.type === 'TARGET');
+    const source = refs.find((r) => r && r.type === 'SOURCE');
+    const term = /\/terms\/([^/]+)$/.exec(String((target && target.name) || ''));
+    if (term) terms.add(term[1]);
+    const column = /^Schema\.(.+)$/.exec(String((source && source.path) || ''));
+    if (column) columns.add(column[1]);
+    else if (source) tableLevel = true;
+  }
+  return {
+    termLinks: links.length,
+    terms: [...terms].sort(),
+    columns: [...columns].sort(),
+    tableLevel,
+    truncated: !!(response && response.nextPageToken),
+  };
+}
+
 /** Item da visão de catálogo para uma entrada lida com sucesso. */
 function catalogItemFromEntry(base, entry, { entryName, entryLocation }) {
   return {
@@ -114,5 +147,6 @@ module.exports = {
   aspectData,
   scorecardFromEntry,
   catalogFactsFromEntry,
+  glossaryFactsFromLinks,
   catalogItemFromEntry,
 };
