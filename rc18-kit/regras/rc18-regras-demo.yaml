@@ -1,0 +1,251 @@
+# Kit RC 18 — regras de qualidade de dados (Dataplex) marcadas com as dimensões da
+# Resolução Conjunta nº 18/2025 (art. 2º, § 2º).
+#
+# Formato: arquivo de especificação aceito por
+#   gcloud dataplex datascans create data-quality ... --data-quality-spec-file=ARQUIVO
+#
+# Como o painel lê este arquivo depois de aplicado:
+#   - `dimension` define em qual das 12 dimensões a regra é contada. As dimensões padrão do
+#     Dataplex continuam valendo (COMPLETENESS, VALIDITY, UNIQUENESS, FRESHNESS...); as
+#     dimensões personalizadas usam o nome da dimensão da Resolução em maiúsculas e sem acento
+#     (ADAPTABILIDADE, COMPARABILIDADE, CONFIABILIDADE, INTEGRIDADE...).
+#   - `name` e `description` aparecem na lista de regras do painel.
+#
+# Os limites (5%, 10 dias, 35 dias, 180 dias...) são EXEMPLOS. A Resolução não define métricas
+# nem níveis mínimos por dimensão: cada instituição declara os seus nas regras.
+#
+# Variáveis substituídas por envsubst: ${PROJECT_ID}, ${DS}
+# `${data()}` é sintaxe do Dataplex (a tabela avaliada) e não deve ser substituída.
+
+catalogPublishingEnabled: true
+rules:
+  # ── VI Completude ─────────────────────────────────────────────────────────────────────────
+  - name: id-operacao-preenchido
+    description: Toda posição tem o identificador da operação preenchido.
+    dimension: COMPLETENESS
+    column: id_operacao
+    threshold: 1.0
+    nonNullExpectation: {}
+
+  - name: valor-saldo-preenchido
+    description: Toda posição tem o saldo preenchido.
+    dimension: COMPLETENESS
+    column: valor_saldo
+    threshold: 1.0
+    nonNullExpectation: {}
+
+  # ── II Acurácia ───────────────────────────────────────────────────────────────────────────
+  - name: saldo-nao-negativo
+    description: O saldo devedor não é negativo.
+    dimension: VALIDITY
+    column: valor_saldo
+    threshold: 1.0
+    rangeExpectation:
+      minValue: '0'
+
+  # ── VIII Consistência ─────────────────────────────────────────────────────────────────────
+  - name: chave-sem-duplicidade
+    description: Não há mais de um registro para a mesma operação na mesma data-base.
+    dimension: UNIQUENESS
+    sqlAssertion:
+      sqlStatement: >-
+        SELECT id_operacao, data_base, COUNT(*) AS registros
+        FROM ${data()}
+        GROUP BY id_operacao, data_base
+        HAVING COUNT(*) > 1
+
+  # ── XII Tempestividade ────────────────────────────────────────────────────────────────────
+  - name: carga-dentro-do-prazo
+    description: >-
+      A carga mais recente tem no máximo 35 dias (informação mensal). O prazo é o declarado
+      nesta regra.
+    dimension: FRESHNESS
+    tableConditionExpectation:
+      sqlExpression: TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), MAX(data_carga), DAY) <= 35
+
+  - name: intervalo-fato-disponibilizacao
+    description: >-
+      Cada posição fica disponível em até 10 dias após a data-base (intervalo entre o fato
+      relatado e a disponibilização). O prazo é o declarado nesta regra.
+    dimension: FRESHNESS
+    column: data_carga
+    threshold: 1.0
+    rowConditionExpectation:
+      sqlExpression: DATE_DIFF(DATE(data_carga), data_base, DAY) <= 10
+
+  # ── VII Confiabilidade ────────────────────────────────────────────────────────────────────
+  # Compara a versão atual (revisada) com a versão informada, guardada em um snapshot de tabela
+  # do BigQuery tirado no momento da remessa.
+  - name: revisao-sem-desvio-relevante
+    description: >-
+      Nenhum registro revisado se afasta mais de 5% do valor informado na remessa (snapshot
+      posicao_credito_informada). O percentual é o declarado nesta regra.
+    dimension: CONFIABILIDADE
+    sqlAssertion:
+      sqlStatement: >-
+        SELECT a.id_operacao, a.data_base, i.valor_saldo AS valor_informado, a.valor_saldo AS valor_revisado
+        FROM ${data()} AS a
+        JOIN `${PROJECT_ID}.${DS}.posicao_credito_informada` AS i USING (id_operacao, data_base)
+        WHERE SAFE_DIVIDE(ABS(a.valor_saldo - i.valor_saldo), ABS(i.valor_saldo)) > 0.05
+
+  - name: total-revisado-proximo-do-informado
+    description: >-
+      O saldo total revisado difere no máximo 1% do saldo total informado na remessa. O
+      percentual é o declarado nesta regra.
+    dimension: CONFIABILIDADE
+    tableConditionExpectation:
+      sqlExpression: >-
+        SAFE_DIVIDE(
+          ABS(SUM(valor_saldo) - (SELECT SUM(valor_saldo) FROM `${PROJECT_ID}.${DS}.posicao_credito_informada`)),
+          (SELECT SUM(valor_saldo) FROM `${PROJECT_ID}.${DS}.posicao_credito_informada`)
+        ) <= 0.01
+
+  # ── IX Integridade ────────────────────────────────────────────────────────────────────────
+  - name: conteudo-confere-com-hash
+    description: >-
+      O conteúdo de cada registro confere com o hash SHA-256 calculado na carga (detecta
+      alteração feita fora do processo de carga).
+    dimension: INTEGRIDADE
+    column: hash_registro
+    threshold: 1.0
+    rowConditionExpectation:
+      sqlExpression: >-
+        hash_registro = TO_HEX(SHA256(CONCAT(id_operacao, '|', CAST(data_base AS STRING), '|',
+        codigo_modalidade, '|', uf, '|', moeda, '|', CAST(valor_saldo AS STRING))))
+
+  - name: alteracao-somente-autorizada
+    description: >-
+      Todo registro diferente da versão informada na remessa tem revisão registrada em
+      revisoes_autorizadas.
+    dimension: INTEGRIDADE
+    sqlAssertion:
+      sqlStatement: >-
+        SELECT a.id_operacao, a.data_base, i.valor_saldo AS valor_informado, a.valor_saldo AS valor_atual
+        FROM ${data()} AS a
+        JOIN `${PROJECT_ID}.${DS}.posicao_credito_informada` AS i USING (id_operacao, data_base)
+        LEFT JOIN `${PROJECT_ID}.${DS}.revisoes_autorizadas` AS r USING (id_operacao, data_base)
+        WHERE r.id_operacao IS NULL
+          AND TO_JSON_STRING((SELECT AS STRUCT a.codigo_modalidade, a.uf, a.moeda, a.valor_saldo))
+           != TO_JSON_STRING((SELECT AS STRUCT i.codigo_modalidade, i.uf, i.moeda, i.valor_saldo))
+
+  - name: exclusao-somente-autorizada
+    description: >-
+      Todo registro da versão informada na remessa continua na tabela, salvo exclusão
+      registrada em revisoes_autorizadas.
+    dimension: INTEGRIDADE
+    sqlAssertion:
+      sqlStatement: >-
+        SELECT i.id_operacao, i.data_base
+        FROM `${PROJECT_ID}.${DS}.posicao_credito_informada` AS i
+        LEFT JOIN ${data()} AS a USING (id_operacao, data_base)
+        LEFT JOIN `${PROJECT_ID}.${DS}.revisoes_autorizadas` AS r USING (id_operacao, data_base)
+        WHERE a.id_operacao IS NULL AND r.id_operacao IS NULL
+
+  # ── V Comparabilidade ─────────────────────────────────────────────────────────────────────
+  - name: uf-no-dominio-padronizado
+    description: A Unidade da Federação pertence ao domínio padronizado (tabela ref_uf).
+    dimension: COMPARABILIDADE
+    column: uf
+    threshold: 1.0
+    rowConditionExpectation:
+      sqlExpression: uf IN (SELECT sigla FROM `${PROJECT_ID}.${DS}.ref_uf`)
+
+  - name: modalidade-no-dominio-padronizado
+    description: A modalidade pertence ao domínio padronizado (tabela ref_modalidade).
+    dimension: COMPARABILIDADE
+    column: codigo_modalidade
+    threshold: 1.0
+    rowConditionExpectation:
+      sqlExpression: codigo_modalidade IN (SELECT codigo FROM `${PROJECT_ID}.${DS}.ref_modalidade`)
+
+  - name: moeda-unica-por-data-base
+    description: Cada data-base usa uma única moeda (os valores são comparáveis entre si).
+    dimension: COMPARABILIDADE
+    sqlAssertion:
+      sqlStatement: >-
+        SELECT data_base, COUNT(DISTINCT moeda) AS moedas
+        FROM ${data()}
+        GROUP BY data_base
+        HAVING COUNT(DISTINCT moeda) > 1
+
+  - name: serie-mensal-sem-lacunas
+    description: >-
+      Há posição para todos os meses entre a primeira e a última data-base (a série permite
+      comparar períodos).
+    dimension: COMPARABILIDADE
+    sqlAssertion:
+      sqlStatement: >-
+        SELECT mes AS mes_sem_posicao
+        FROM UNNEST(GENERATE_DATE_ARRAY(
+          (SELECT DATE_TRUNC(MIN(data_base), MONTH) FROM ${data()}),
+          (SELECT DATE_TRUNC(MAX(data_base), MONTH) FROM ${data()}),
+          INTERVAL 1 MONTH)) AS mes
+        WHERE mes NOT IN (SELECT DISTINCT DATE_TRUNC(data_base, MONTH) FROM ${data()})
+
+  # ── III Adaptabilidade ────────────────────────────────────────────────────────────────────
+  # Lê a tabela de controle em que a instituição registra os testes de geração da informação
+  # fora da rotina (testes_geracao_sob_demanda). O painel não executa os testes: mostra se há
+  # registro de teste bem-sucedido dentro da janela declarada.
+  - name: teste-demanda-nao-periodica
+    description: >-
+      Há teste bem-sucedido de geração para demanda não periódica nos últimos 180 dias. A
+      janela é a declarada nesta regra.
+    dimension: ADAPTABILIDADE
+    sqlAssertion:
+      sqlStatement: >-
+        SELECT 'sem teste bem-sucedido na janela' AS motivo
+        FROM (
+          SELECT COUNT(*) AS testes
+          FROM `${PROJECT_ID}.${DS}.testes_geracao_sob_demanda`
+          WHERE informacao = 'posicao_credito' AND cenario = 'demanda_nao_periodica'
+            AND resultado = 'sucesso'
+            AND data_entrega >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 180 DAY)
+        )
+        WHERE testes = 0
+
+  - name: teste-mudanca-regulamentar
+    description: >-
+      Há teste bem-sucedido de geração no formato de uma mudança regulamentar prevista nos
+      últimos 180 dias. A janela é a declarada nesta regra.
+    dimension: ADAPTABILIDADE
+    sqlAssertion:
+      sqlStatement: >-
+        SELECT 'sem teste bem-sucedido na janela' AS motivo
+        FROM (
+          SELECT COUNT(*) AS testes
+          FROM `${PROJECT_ID}.${DS}.testes_geracao_sob_demanda`
+          WHERE informacao = 'posicao_credito' AND cenario = 'mudanca_regulamentar'
+            AND resultado = 'sucesso'
+            AND data_entrega >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 180 DAY)
+        )
+        WHERE testes = 0
+
+  - name: teste-contingencia
+    description: >-
+      Há teste bem-sucedido de geração em situação adversa (ambiente de contingência) nos
+      últimos 180 dias. A janela é a declarada nesta regra.
+    dimension: ADAPTABILIDADE
+    sqlAssertion:
+      sqlStatement: >-
+        SELECT 'sem teste bem-sucedido na janela' AS motivo
+        FROM (
+          SELECT COUNT(*) AS testes
+          FROM `${PROJECT_ID}.${DS}.testes_geracao_sob_demanda`
+          WHERE informacao = 'posicao_credito' AND cenario = 'contingencia'
+            AND resultado = 'sucesso'
+            AND data_entrega >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 180 DAY)
+        )
+        WHERE testes = 0
+
+  - name: testes-entregues-no-prazo
+    description: >-
+      Os testes bem-sucedidos dos últimos 180 dias foram entregues dentro do prazo definido
+      para o cenário.
+    dimension: ADAPTABILIDADE
+    sqlAssertion:
+      sqlStatement: >-
+        SELECT cenario, data_solicitacao, data_entrega, prazo_horas
+        FROM `${PROJECT_ID}.${DS}.testes_geracao_sob_demanda`
+        WHERE informacao = 'posicao_credito' AND resultado = 'sucesso'
+          AND data_entrega >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 180 DAY)
+          AND TIMESTAMP_DIFF(data_entrega, data_solicitacao, HOUR) > prazo_horas

@@ -1,0 +1,18 @@
+{
+  "dataplex-types.global.contacts": {
+    "data": {
+      "identities": [
+        {
+          "role": "steward",
+          "name": "Equipe de governança de dados (fictícia)",
+          "id": "governanca-dados@example.com"
+        }
+      ]
+    }
+  },
+  "dataplex-types.global.overview": {
+    "data": {
+      "content": "<p><b>Posição de operações de crédito (dados fictícios do kit RC 18).</b></p><p>Onde está: tabela posicao_credito, atualizada mensalmente até o 10º dia após a data-base.</p><p>Como pedir acesso ou um recorte fora do calendário: procurar a equipe indicada em Contatos.</p>"
+    }
+  }
+}

@@ -210,3 +210,6 @@ echo "  - Authorized redirect URIs     : $SERVICE_URL  e  $SERVICE_URL/auth/goog
 echo ""
 echo "Se o login funcionar mas as chamadas /api retornarem 401 'not issued for this application',"
 echo "confira se GOOGLE_OAUTH_CLIENT_ID no serviço é o mesmo Client ID usado na página."
+echo ""
+echo "Para ver o painel RC 18 com as 12 dimensões medidas em dados sintéticos, crie a demonstração:"
+echo "  PROJECT_ID=$PROJECT_ID ./rc18-kit/criar-demo.sh"
