@@ -198,7 +198,7 @@ async function collectLineage({ auth, projectId, tables, metadataByKey = {} }) {
 
 /**
  * Lê as entradas do Knowledge Catalog das tabelas do escopo (GetEntry, visão ALL: aspectos de
- * contatos, documentação, uso, cadência e scorecard) e chama `lookupContext` (até 10 recursos
+ * contatos, documentação, uso e scorecard) e chama `lookupContext` (até 10 recursos
  * por localização).
  */
 async function collectCatalogContext({ auth, projectId, tables, metadataByKey = {}, getAccessToken }) {

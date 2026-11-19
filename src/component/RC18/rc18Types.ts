@@ -39,6 +39,8 @@ export interface Rc18Dimension {
   fontes: string[];
   comoEMedido: string | null;
   lacuna: string;
+  /** Dimensão sem coletor próprio, medida só por regras marcadas com a dimensão personalizada. */
+  porRegrasPersonalizadas?: boolean;
   evidencias: Rc18Evidence[];
 }
 

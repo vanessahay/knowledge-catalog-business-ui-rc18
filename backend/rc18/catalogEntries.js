@@ -8,8 +8,9 @@
  *   - contacts               -> identities[] { role, name, id }
  *   - overview               -> content, links[]
  *   - usage                  -> metrics[] { name, timeSeries[] { interval, value } }, refreshTime
- *   - refresh-cadence        -> frequency, refreshTime, thresholdInMinutes, cronSchedule
  *   - data-quality-scorecard -> score, status, dimensions[]
+ * (O aspecto `refresh-cadence` não é lido: ele descreve garantias de produtos de dados, e o
+ * escopo deste painel são tabelas.)
  *
  * Nada é presumido: aspecto ausente ou vazio vira contagem zero ou `null`.
  */
@@ -64,7 +65,7 @@ function scorecardFromEntry(entry) {
   return { score: data.score, status: typeof data.status === 'string' ? data.status : null };
 }
 
-/** Fatos de contexto de negócio registrados na entrada (contatos, documentação, uso, cadência). */
+/** Fatos de contexto de negócio registrados na entrada (contatos, documentação e uso). */
 function catalogFactsFromEntry(entry) {
   const contacts = aspectData(entry, 'contacts');
   const identities = contacts && Array.isArray(contacts.identities) ? contacts.identities : [];
@@ -84,15 +85,11 @@ function catalogFactsFromEntry(entry) {
     if (Number.isFinite(value)) queries30d = value;
   }
 
-  const cadence = aspectData(entry, 'refresh-cadence');
-  const refreshCadence = cadence && typeof cadence.frequency === 'string' && cadence.frequency ? cadence.frequency : null;
-
   return {
     contactsCount,
     hasOverview,
     queries30d,
     usageRefreshTime: usage && typeof usage.refreshTime === 'string' ? usage.refreshTime : null,
-    refreshCadence,
   };
 }
 

@@ -416,7 +416,6 @@ function createRc18Router({ getAuthClient, getRequestAccessToken, dataFilePath }
           contactsCount: item.facts ? item.facts.contactsCount : null,
           hasOverview: item.facts ? item.facts.hasOverview : null,
           queries30d: item.facts ? item.facts.queries30d : null,
-          refreshCadence: item.facts ? item.facts.refreshCadence : null,
           governanceDomain: item.dataset,
           dataQualityScore: ts ? ts.overallScore : null,
           complianceStatus: ts ? ts.status : 'Sem execução',

@@ -35,7 +35,7 @@ Nada é preenchido com valores presumidos: o que não foi medido aparece como "s
 | IX | Integridade | Sem coletor | — | — |
 | X | Rastreabilidade | Parcial | % de tabelas do escopo com origem registrada | Data Lineage API — `SearchLinks` |
 | XI | Relevância | Parcial | % de tabelas do escopo com consultas nos últimos 30 dias | Knowledge Catalog — aspecto `usage` |
-| XII | Tempestividade | Parcial | % de regras aprovadas (`FRESHNESS`), quando existirem; cadência declarada (aspecto `refresh-cadence`) e última modificação apenas como informação | Dataplex DataScans; Knowledge Catalog; BigQuery |
+| XII | Tempestividade | Parcial | % de regras aprovadas (`FRESHNESS` ou `TIMELINESS`), quando existirem; data da última modificação apenas como informação | Dataplex DataScans; BigQuery |
 
 - **Automática**: o indicador é a razão *regras aprovadas / regras executadas* na última execução dos DataScans — o
   mesmo critério do score do Dataplex. Regras configuradas e ainda não executadas ficam fora do cálculo e são
@@ -78,7 +78,7 @@ Banco Central do Brasil; cabe à instituição garantir que as tabelas que alime
 3. **Descrições** — preencha a descrição das tabelas e das colunas no BigQuery (dicionário de dados — art. 3º,
    III, "c").
 4. **Contexto de negócio no Knowledge Catalog** — registre nas entradas das tabelas os aspectos `contacts`
-   (responsáveis), `overview` (documentação) e, se aplicável, `refresh-cadence`.
+   (responsáveis) e `overview` (documentação).
 5. **Linhagem** — habilite a Data Lineage API no projeto: os serviços integrados (por exemplo, os jobs do
    BigQuery) passam a registrar os elos das execuções seguintes.
 

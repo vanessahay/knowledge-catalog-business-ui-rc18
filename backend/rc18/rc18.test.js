@@ -171,8 +171,15 @@ test('relatório das 12 dimensões (dados de demonstração)', () => {
     { rotulo: 'Tabelas sem métrica de uso informada pelo catálogo', valor: '1 de 4' },
   ]);
   assert.ok(by.clareza.evidencias.some((e) => e.rotulo.includes('aspecto overview') && e.valor === '2 de 4'));
-  assert.ok(by.tempestividade.evidencias[0].rotulo.includes('refresh-cadence'));
-  assert.equal(by.tempestividade.evidencias[0].valor, '1 de 4');
+  assert.ok(by.tempestividade.evidencias.every((e) => e.rotulo.startsWith('Última modificação')));
+
+  // Dimensão sem coletor medida por regras personalizadas: o limite informado é o do indicador.
+  assert.equal(by.integridade.coleta, 'declaratoria');
+  assert.equal(by.integridade.porRegrasPersonalizadas, true);
+  assert.match(by.integridade.lacuna, /^Reflete apenas as regras que a instituição marcou/);
+  assert.equal(by.acuracia.porRegrasPersonalizadas, false);
+  assert.equal(by.confiabilidade.porRegrasPersonalizadas, false);
+  assert.match(by.confiabilidade.lacuna, /^Sem coleta automática nesta versão/);
 
   const clareza = by.clareza.indicadores.find((i) => i.id === 'colunas_descritas');
   assert.equal(clareza.numerador, 9);
@@ -279,7 +286,7 @@ test('scorecard do Knowledge Catalog: lê Struct gRPC e JSON simples', () => {
   assert.equal(scorecardFromEntry({ aspects: { 'x.global.schema': { data: {} } } }), null);
 });
 
-test('fatos da entrada do Knowledge Catalog: contatos, documentação, uso e cadência', () => {
+test('fatos da entrada do Knowledge Catalog: contatos, documentação e uso', () => {
   const str = (v) => ({ kind: 'stringValue', stringValue: v });
   const num = (v) => ({ kind: 'numberValue', numberValue: v });
   const list = (values) => ({ kind: 'listValue', listValue: { values } });
@@ -306,6 +313,7 @@ test('fatos da entrada do Knowledge Catalog: contatos, documentação, uso e cad
           },
         },
       },
+      // Aspecto de produtos de dados: presente na entrada, mas não lido pelo painel.
       '655216118709.global.refresh-cadence': { data: { fields: { frequency: str('Daily') } } },
     },
   };
@@ -314,7 +322,6 @@ test('fatos da entrada do Knowledge Catalog: contatos, documentação, uso e cad
     hasOverview: true,
     queries30d: 12,
     usageRefreshTime: '2026-01-15T00:00:00Z',
-    refreshCadence: 'Daily',
   });
 
   // Formato JSON simples (REST). Aspecto de uso vazio = métrica não informada (null), não zero.
@@ -330,7 +337,6 @@ test('fatos da entrada do Knowledge Catalog: contatos, documentação, uso e cad
     hasOverview: false,
     queries30d: null,
     usageRefreshTime: null,
-    refreshCadence: null,
   });
   const zero = { aspects: { 'x.global.usage': { data: { metrics: [{ name: 'total_queries', timeSeries: [{ interval: '30d', value: 0 }] }] } } } };
   assert.equal(catalogFactsFromEntry(zero).queries30d, 0);

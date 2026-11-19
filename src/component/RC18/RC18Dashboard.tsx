@@ -99,7 +99,6 @@ interface CatalogContextItem {
   contactsCount?: number | null;
   hasOverview?: boolean | null;
   queries30d?: number | null;
-  refreshCadence?: string | null;
   found?: boolean;
   error?: string | null;
   governanceDomain: string;

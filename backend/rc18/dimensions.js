@@ -184,13 +184,9 @@ const DIMENSIONS = Object.freeze([
       'fornecimento das informações em tempo hábil, no prazo estabelecido, observado um curto intervalo de tempo entre os fatos relatados e a data da prestação da informação, de modo a não comprometer sua utilidade aos usuários',
     coleta: 'parcial',
     dqDimensions: ['FRESHNESS', 'TIMELINESS', 'TEMPESTIVIDADE'],
-    fontes: [
-      'Dataplex DataScan (qualidade de dados)',
-      'Knowledge Catalog (aspecto refresh-cadence)',
-      'BigQuery (data da última modificação)',
-    ],
+    fontes: ['Dataplex DataScan (qualidade de dados)', 'BigQuery (data da última modificação)'],
     comoEMedido:
-      'Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A cadência de atualização declarada no catálogo e a data da última modificação das tabelas são exibidas apenas como informação.',
+      'Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A data da última modificação das tabelas é exibida apenas como informação.',
     lacuna: 'O cumprimento dos prazos de remessa ao Banco Central do Brasil não é observável nesta plataforma.',
   },
 ]);

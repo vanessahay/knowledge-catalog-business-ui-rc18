@@ -14,6 +14,11 @@
 const { DIMENSIONS, buildDqDimensionIndex } = require('./dimensions');
 const { scoreFromRules, round2 } = require('./dqScans');
 
+const COMO_MEDIDO_REGRAS_PERSONALIZADAS =
+  'Percentual de regras aprovadas entre as regras de DataScan marcadas com a dimensão personalizada.';
+const LIMITE_REGRAS_PERSONALIZADAS =
+  'Reflete apenas as regras que a instituição marcou com esta dimensão personalizada; se elas bastam para evidenciar a dimensão é avaliação da instituição.';
+
 function sum(list, pick) {
   return list.reduce((acc, item) => acc + (Number(pick(item)) || 0), 0);
 }
@@ -122,12 +127,6 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
     }
 
     if (d.id === 'tempestividade') {
-      if (okCatalog.length > 0) {
-        evidencias.push({
-          rotulo: 'Tabelas com cadência de atualização declarada no Knowledge Catalog (aspecto refresh-cadence)',
-          valor: `${countCatalog((f) => !!f.refreshCadence)} de ${okCatalog.length}`,
-        });
-      }
       for (const m of okMetadata) {
         if (m.lastModifiedTime) {
           evidencias.push({ rotulo: `Última modificação — ${m.key}`, valor: m.lastModifiedTime });
@@ -138,6 +137,10 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
     let estado = 'nao_medido';
     if (indicadores.length > 0) estado = 'medido';
     else if (d.coleta !== 'declaratoria') estado = 'sem_dados';
+
+    // Dimensão sem coletor próprio, medida só pelas regras que a instituição marcou com a
+    // dimensão personalizada: o limite a informar é o do próprio indicador.
+    const porRegrasPersonalizadas = d.coleta === 'declaratoria' && indicadores.length > 0;
 
     return {
       id: d.id,
@@ -156,8 +159,9 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
       },
       dqDimensions: d.dqDimensions,
       fontes: d.fontes,
-      comoEMedido: d.comoEMedido,
-      lacuna: d.lacuna,
+      comoEMedido: porRegrasPersonalizadas ? COMO_MEDIDO_REGRAS_PERSONALIZADAS : d.comoEMedido,
+      lacuna: porRegrasPersonalizadas ? LIMITE_REGRAS_PERSONALIZADAS : d.lacuna,
+      porRegrasPersonalizadas,
       evidencias,
     };
   });

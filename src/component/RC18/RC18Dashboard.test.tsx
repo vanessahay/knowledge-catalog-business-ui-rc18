@@ -89,6 +89,13 @@ describe('RC18Dashboard', () => {
     expect(within(acuracia).getByText('66,67%')).toBeInTheDocument();
     expect(within(acuracia).getByText(/1 regra\(s\) configurada\(s\) sem execução/)).toBeInTheDocument();
 
+    // Dimensão sem coletor, medida por regra marcada com a dimensão personalizada.
+    const integridade = screen.getByTestId('rc18-dimensao-integridade');
+    expect(within(integridade).getByText('100%')).toBeInTheDocument();
+    expect(within(integridade).getByText(/Coleta: regras de DataScan marcadas com a dimensão personalizada/)).toBeInTheDocument();
+    expect(within(integridade).getByText(/Limite do indicador: Reflete apenas as regras que a instituição marcou/)).toBeInTheDocument();
+    expect(within(integridade).queryByText(/Sem coleta automática/)).toBeNull();
+
     for (const id of ['adaptabilidade', 'comparabilidade', 'confiabilidade']) {
       const card = screen.getByTestId(`rc18-dimensao-${id}`);
       expect(within(card).getByText('Não medido automaticamente')).toBeInTheDocument();

@@ -198,7 +198,6 @@ function demoCatalog(projectId) {
       },
       overview: { content: '<p>Base cadastral de clientes (exemplo sintético).</p>', links: [] },
       usage: usage(412),
-      'refresh-cadence': { frequency: 'Daily' },
       'data-quality-scorecard': { score: 80, status: 'FAIL' },
     }),
     mk('fin_demo_cartoes', 'transacao_cartao', {

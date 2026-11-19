@@ -102,7 +102,9 @@ const DimensionCard: React.FC<{ dimension: Rc18Dimension }> = ({ dimension: d })
 
         <Box sx={{ borderTop: '1px solid #F1F3F4', mt: 1.5, pt: 1.5 }}>
           <Typography variant="caption" sx={{ display: 'block', color: '#5F6368' }}>
-            {COLETA_LABEL[d.coleta]}
+            {d.porRegrasPersonalizadas
+              ? 'Coleta: regras de DataScan marcadas com a dimensão personalizada'
+              : COLETA_LABEL[d.coleta]}
             {d.fontes.length > 0 ? ` • ${d.fontes.join('; ')}` : ''}
           </Typography>
           {d.indicadores.length > 0 && (

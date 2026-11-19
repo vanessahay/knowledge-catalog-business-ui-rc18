@@ -66,6 +66,7 @@
           ],
           "comoEMedido": "Percentual de tabelas do escopo com contatos registrados no Knowledge Catalog (aspecto contacts).",
           "lacuna": "Cobre apenas a indicação, no catálogo de dados, de a quem dirigir demandas sobre a informação. O local de disponibilização ao usuário, os prazos e o tratamento especial às pessoas com deficiência precisam ser evidenciados pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -102,6 +103,7 @@
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY).",
           "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos (art. 3º, V, \"a\").",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -125,6 +127,7 @@
           "fontes": [],
           "comoEMedido": null,
           "lacuna": "Sem coleta automática nesta versão. É um atributo de arquitetura e de processo, a ser evidenciado pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -160,6 +163,7 @@
           ],
           "comoEMedido": "Percentual de colunas com descrição nas tabelas do escopo.",
           "lacuna": "Cobre apenas a documentação técnica (dicionário de dados — art. 3º, III, \"c\"). A clareza da informação entregue ao usuário não é avaliada.",
+          "porRegrasPersonalizadas": false,
           "evidencias": [
             {
               "rotulo": "Tabelas com descrição",
@@ -192,6 +196,7 @@
           "fontes": [],
           "comoEMedido": null,
           "lacuna": "Sem coleta automática nesta versão.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -228,6 +233,7 @@
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões COMPLETENESS e VOLUME).",
           "lacuna": "Mede apenas os campos e as tabelas com regras configuradas; não verifica se todos os aspectos requeridos pelo demandante foram atendidos.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -251,6 +257,7 @@
           "fontes": [],
           "comoEMedido": null,
           "lacuna": "Sem coleta automática nesta versão. A definição trata de revisões: exige comparar o dado revisado com o valor inicialmente prestado.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -287,6 +294,7 @@
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões CONSISTENCY e UNIQUENESS).",
           "lacuna": "A consistência entre fontes distintas depende de regras de reconciliação definidas pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -317,8 +325,9 @@
             "INTEGRIDADE"
           ],
           "fontes": [],
-          "comoEMedido": null,
-          "lacuna": "Sem coleta automática nesta versão. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, \"e\".",
+          "comoEMedido": "Percentual de regras aprovadas entre as regras de DataScan marcadas com a dimensão personalizada.",
+          "lacuna": "Reflete apenas as regras que a instituição marcou com esta dimensão personalizada; se elas bastam para evidenciar a dimensão é avaliação da instituição.",
+          "porRegrasPersonalizadas": true,
           "evidencias": []
         },
         {
@@ -353,6 +362,7 @@
           ],
           "comoEMedido": "Percentual de tabelas do escopo com origem registrada na Data Lineage API.",
           "lacuna": "Cobre apenas as transformações registradas no Google Cloud. Os trechos fora da plataforma (sistemas de origem e entrega ao usuário final) precisam ser documentados pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -387,6 +397,7 @@
           ],
           "comoEMedido": "Percentual de tabelas do escopo com consultas registradas nos últimos 30 dias (aspecto usage do Knowledge Catalog).",
           "lacuna": "O uso técnico da tabela não comprova que a informação é útil para a tomada de decisões pelos usuários; a contagem de consultas é a informada pelo catálogo e pode incluir consultas automatizadas.",
+          "porRegrasPersonalizadas": false,
           "evidencias": [
             {
               "rotulo": "Tabelas sem métrica de uso informada pelo catálogo",
@@ -425,16 +436,12 @@
           ],
           "fontes": [
             "Dataplex DataScan (qualidade de dados)",
-            "Knowledge Catalog (aspecto refresh-cadence)",
             "BigQuery (data da última modificação)"
           ],
-          "comoEMedido": "Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A cadência de atualização declarada no catálogo e a data da última modificação das tabelas são exibidas apenas como informação.",
+          "comoEMedido": "Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A data da última modificação das tabelas é exibida apenas como informação.",
           "lacuna": "O cumprimento dos prazos de remessa ao Banco Central do Brasil não é observável nesta plataforma.",
+          "porRegrasPersonalizadas": false,
           "evidencias": [
-            {
-              "rotulo": "Tabelas com cadência de atualização declarada no Knowledge Catalog (aspecto refresh-cadence)",
-              "valor": "1 de 4"
-            },
             {
               "rotulo": "Última modificação — fin_demo_cadastro.dados_cadastrais",
               "valor": "2026-01-15T08:03:36.000Z"
@@ -794,7 +801,6 @@
             "contacts",
             "data-quality-scorecard",
             "overview",
-            "refresh-cadence",
             "schema",
             "storage",
             "usage"
@@ -804,7 +810,6 @@
           "contactsCount": 2,
           "hasOverview": true,
           "queries30d": 412,
-          "refreshCadence": "Daily",
           "governanceDomain": "fin_demo_cadastro",
           "dataQualityScore": 80,
           "complianceStatus": "Com falhas",
@@ -830,7 +835,6 @@
           "contactsCount": 1,
           "hasOverview": false,
           "queries30d": 96,
-          "refreshCadence": null,
           "governanceDomain": "fin_demo_cartoes",
           "dataQualityScore": 75,
           "complianceStatus": "Com falhas",
@@ -855,7 +859,6 @@
           "contactsCount": 0,
           "hasOverview": false,
           "queries30d": null,
-          "refreshCadence": null,
           "governanceDomain": "fin_demo_contas",
           "dataQualityScore": 100,
           "complianceStatus": "Sem falhas",
@@ -881,7 +884,6 @@
           "contactsCount": 0,
           "hasOverview": true,
           "queries30d": 0,
-          "refreshCadence": null,
           "governanceDomain": "fin_demo_credito",
           "dataQualityScore": null,
           "complianceStatus": "Sem execução",
@@ -1470,6 +1472,7 @@
           ],
           "comoEMedido": "Percentual de tabelas do escopo com contatos registrados no Knowledge Catalog (aspecto contacts).",
           "lacuna": "Cobre apenas a indicação, no catálogo de dados, de a quem dirigir demandas sobre a informação. O local de disponibilização ao usuário, os prazos e o tratamento especial às pessoas com deficiência precisam ser evidenciados pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1497,6 +1500,7 @@
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY).",
           "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos (art. 3º, V, \"a\").",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1520,6 +1524,7 @@
           "fontes": [],
           "comoEMedido": null,
           "lacuna": "Sem coleta automática nesta versão. É um atributo de arquitetura e de processo, a ser evidenciado pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1546,6 +1551,7 @@
           ],
           "comoEMedido": "Percentual de colunas com descrição nas tabelas do escopo.",
           "lacuna": "Cobre apenas a documentação técnica (dicionário de dados — art. 3º, III, \"c\"). A clareza da informação entregue ao usuário não é avaliada.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1569,6 +1575,7 @@
           "fontes": [],
           "comoEMedido": null,
           "lacuna": "Sem coleta automática nesta versão.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1596,6 +1603,7 @@
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões COMPLETENESS e VOLUME).",
           "lacuna": "Mede apenas os campos e as tabelas com regras configuradas; não verifica se todos os aspectos requeridos pelo demandante foram atendidos.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1619,6 +1627,7 @@
           "fontes": [],
           "comoEMedido": null,
           "lacuna": "Sem coleta automática nesta versão. A definição trata de revisões: exige comparar o dado revisado com o valor inicialmente prestado.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1646,6 +1655,7 @@
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões CONSISTENCY e UNIQUENESS).",
           "lacuna": "A consistência entre fontes distintas depende de regras de reconciliação definidas pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1669,6 +1679,7 @@
           "fontes": [],
           "comoEMedido": null,
           "lacuna": "Sem coleta automática nesta versão. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, \"e\".",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1694,6 +1705,7 @@
           ],
           "comoEMedido": "Percentual de tabelas do escopo com origem registrada na Data Lineage API.",
           "lacuna": "Cobre apenas as transformações registradas no Google Cloud. Os trechos fora da plataforma (sistemas de origem e entrega ao usuário final) precisam ser documentados pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1719,6 +1731,7 @@
           ],
           "comoEMedido": "Percentual de tabelas do escopo com consultas registradas nos últimos 30 dias (aspecto usage do Knowledge Catalog).",
           "lacuna": "O uso técnico da tabela não comprova que a informação é útil para a tomada de decisões pelos usuários; a contagem de consultas é a informada pelo catálogo e pode incluir consultas automatizadas.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1743,11 +1756,11 @@
           ],
           "fontes": [
             "Dataplex DataScan (qualidade de dados)",
-            "Knowledge Catalog (aspecto refresh-cadence)",
             "BigQuery (data da última modificação)"
           ],
-          "comoEMedido": "Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A cadência de atualização declarada no catálogo e a data da última modificação das tabelas são exibidas apenas como informação.",
+          "comoEMedido": "Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A data da última modificação das tabelas é exibida apenas como informação.",
           "lacuna": "O cumprimento dos prazos de remessa ao Banco Central do Brasil não é observável nesta plataforma.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         }
       ],
@@ -1957,6 +1970,7 @@
           ],
           "comoEMedido": "Percentual de tabelas do escopo com contatos registrados no Knowledge Catalog (aspecto contacts).",
           "lacuna": "Cobre apenas a indicação, no catálogo de dados, de a quem dirigir demandas sobre a informação. O local de disponibilização ao usuário, os prazos e o tratamento especial às pessoas com deficiência precisam ser evidenciados pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -1984,6 +1998,7 @@
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY).",
           "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos (art. 3º, V, \"a\").",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -2007,6 +2022,7 @@
           "fontes": [],
           "comoEMedido": null,
           "lacuna": "Sem coleta automática nesta versão. É um atributo de arquitetura e de processo, a ser evidenciado pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -2033,6 +2049,7 @@
           ],
           "comoEMedido": "Percentual de colunas com descrição nas tabelas do escopo.",
           "lacuna": "Cobre apenas a documentação técnica (dicionário de dados — art. 3º, III, \"c\"). A clareza da informação entregue ao usuário não é avaliada.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -2056,6 +2073,7 @@
           "fontes": [],
           "comoEMedido": null,
           "lacuna": "Sem coleta automática nesta versão.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -2083,6 +2101,7 @@
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões COMPLETENESS e VOLUME).",
           "lacuna": "Mede apenas os campos e as tabelas com regras configuradas; não verifica se todos os aspectos requeridos pelo demandante foram atendidos.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -2106,6 +2125,7 @@
           "fontes": [],
           "comoEMedido": null,
           "lacuna": "Sem coleta automática nesta versão. A definição trata de revisões: exige comparar o dado revisado com o valor inicialmente prestado.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -2133,6 +2153,7 @@
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões CONSISTENCY e UNIQUENESS).",
           "lacuna": "A consistência entre fontes distintas depende de regras de reconciliação definidas pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -2156,6 +2177,7 @@
           "fontes": [],
           "comoEMedido": null,
           "lacuna": "Sem coleta automática nesta versão. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, \"e\".",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -2181,6 +2203,7 @@
           ],
           "comoEMedido": "Percentual de tabelas do escopo com origem registrada na Data Lineage API.",
           "lacuna": "Cobre apenas as transformações registradas no Google Cloud. Os trechos fora da plataforma (sistemas de origem e entrega ao usuário final) precisam ser documentados pela instituição.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -2206,6 +2229,7 @@
           ],
           "comoEMedido": "Percentual de tabelas do escopo com consultas registradas nos últimos 30 dias (aspecto usage do Knowledge Catalog).",
           "lacuna": "O uso técnico da tabela não comprova que a informação é útil para a tomada de decisões pelos usuários; a contagem de consultas é a informada pelo catálogo e pode incluir consultas automatizadas.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         },
         {
@@ -2230,11 +2254,11 @@
           ],
           "fontes": [
             "Dataplex DataScan (qualidade de dados)",
-            "Knowledge Catalog (aspecto refresh-cadence)",
             "BigQuery (data da última modificação)"
           ],
-          "comoEMedido": "Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A cadência de atualização declarada no catálogo e a data da última modificação das tabelas são exibidas apenas como informação.",
+          "comoEMedido": "Percentual de regras de atualidade aprovadas (dimensão FRESHNESS), quando existirem. A data da última modificação das tabelas é exibida apenas como informação.",
           "lacuna": "O cumprimento dos prazos de remessa ao Banco Central do Brasil não é observável nesta plataforma.",
+          "porRegrasPersonalizadas": false,
           "evidencias": []
         }
       ],
