@@ -107,8 +107,10 @@ dados reais: se uma API falhar, o painel mostra o erro em "diagnósticos" e deix
   aplicativo (o instalador define).
 - No modo OAuth do usuário, as chamadas contam para o projeto do OAuth Client: crie o OAuth Client no mesmo
   projeto do deploy ou habilite as APIs também no projeto dele.
-- Os aspectos de perfil de dados e a resposta do `lookupContext` podem conter valores de exemplo dos dados
-  (por exemplo, valores mais frequentes de uma coluna). Leve isso em conta ao escolher o modo conta de serviço.
+- Perfis de dados podem trazer valores das tabelas (por exemplo, os valores mais frequentes de uma coluna). No
+  teste com os papéis do instalador, a resposta do `lookupContext` veio **sem** valores de exemplo e sem
+  estatísticas de coluna para a conta de serviço (eles apareceram para o administrador do projeto), mas o aspecto
+  `data-profile` das entradas continuou legível. Leve isso em conta ao escolher o modo conta de serviço.
 
 Papéis que o instalador concede à conta de serviço no modo conta de serviço (no modo OAuth do usuário, cada
 usuário precisa de acesso equivalente):
@@ -196,6 +198,40 @@ gcloud run deploy "$SERVICE_NAME" \
   --project="$PROJECT_ID"
 ```
 
+### Deploy contínuo (opcional)
+
+O Cloud Run pode criar um gatilho do Cloud Build ligado ao repositório (*Set up continuous deployment*): a cada
+push no ramo escolhido, ele constrói a imagem e executa `gcloud run services update --image`. O gatilho troca só a
+imagem (e rótulos): variáveis de ambiente, conta de serviço e limites do serviço são mantidos.
+
+Se o build falhar com `invalid value for build.service_account`, o gatilho foi criado apontando para a conta
+legada do Cloud Build: aponte-o para uma conta de serviço gerenciada pelo usuário. Os vínculos abaixo foram
+suficientes para um gatilho criado pelo console do Cloud Run:
+
+```bash
+CD_SA="cloudbuild-cd-kc-ui@${PROJECT_ID}.iam.gserviceaccount.com"
+gcloud iam service-accounts create cloudbuild-cd-kc-ui --project="$PROJECT_ID"
+
+# logs do build (o gatilho criado pelo console grava só no Cloud Logging)
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:$CD_SA" --role=roles/logging.logWriter --condition=None
+# enviar a imagem ao repositório usado pelo gatilho (por padrão, cloud-run-source-deploy)
+gcloud artifacts repositories add-iam-policy-binding cloud-run-source-deploy --location="$REGION" \
+  --project="$PROJECT_ID" --member="serviceAccount:$CD_SA" --role=roles/artifactregistry.writer
+# atualizar somente este serviço
+gcloud run services add-iam-policy-binding "$SERVICE_NAME" --region="$REGION" \
+  --project="$PROJECT_ID" --member="serviceAccount:$CD_SA" --role=roles/run.developer
+# publicar revisões que rodam com a conta de serviço do runtime
+gcloud iam service-accounts add-iam-policy-binding "$SA_EMAIL" \
+  --project="$PROJECT_ID" --member="serviceAccount:$CD_SA" --role=roles/iam.serviceAccountUser
+
+gcloud builds triggers update github NOME_DO_GATILHO --project="$PROJECT_ID" \
+  --service-account="projects/${PROJECT_ID}/serviceAccounts/${CD_SA}"
+```
+
+Quem pode fazer push no ramo do gatilho publica código que roda com a conta de serviço do runtime — mais um
+motivo para o runtime usar a conta dedicada criada pelo instalador, e não a conta padrão do Compute.
+
 ---
 
 ## Execução local (desenvolvimento)
@@ -262,6 +298,8 @@ O teste do backend gera as respostas que o teste do frontend renderiza
 - `lookupContext`: até 10 entradas por localização.
 - Linhagem: primeira página de elos por tabela e até 3 processos por tabela.
 - Adaptabilidade, comparabilidade, confiabilidade e integridade não têm coletor nesta versão.
+- O instalador não remove papéis: se uma instalação no modo conta de serviço for refeita no modo OAuth do
+  usuário, os papéis já concedidos à conta de serviço do runtime permanecem e devem ser removidos manualmente.
 - A visão de dados sensíveis usa Policy Tags (fato) e o nome das colunas (heurística); não inspeciona conteúdo. A
   contagem de perfis do Sensitive Data Protection é por região e abrange todas as tabelas do projeto.
 
@@ -269,14 +307,23 @@ O teste do backend gera as respostas que o teste do frontend renderiza
 
 - Validado com um projeto real, no modo OAuth do usuário: leitura dos DataScans, metadados do BigQuery, Data
   Lineage API, entradas do Knowledge Catalog e `lookupContext`, com os resultados conferidos com os do Dataplex.
-- Validado com um token Google real: as restrições `GOOGLE_OAUTH_CLIENT_ID` (token emitido para outro aplicativo é
-  recusado) e `ALLOWED_EMAIL_DOMAINS` (domínio fora da lista é recusado).
+  O login pelo navegador foi validado em um serviço publicado sem `GOOGLE_OAUTH_CLIENT_ID`.
+- Instalador `deploy-gcp.sh`: executado em um projeto real nos dois modos (a segunda execução sobre os recursos
+  já criados pela primeira). Os serviços resultantes foram testados por API:
+  - modo OAuth do usuário: conta de serviço do runtime sem papel algum; o painel e as rotas do catálogo
+    responderam com o token do usuário;
+  - modo conta de serviço: só com os papéis da tabela de permissões, o painel respondeu sem falhas de API e com
+    os mesmos indicadores do modo OAuth; busca, verificação de permissões e contagem de perfis do Sensitive Data
+    Protection funcionaram; a leitura de dados (amostra de tabela) foi recusada, como esperado;
+  - restrições: token emitido para outro OAuth Client → 401; e-mail de domínio fora de `ALLOWED_EMAIL_DOMAINS`
+    → 403.
 - Dimensões personalizadas: a API do Dataplex aceitou regras com `INTEGRIDADE` e `CONFIABILIDADE` na validação da
   especificação (`CreateDataScan` com `validateOnly=true`) e recusou nomes em minúsculas ou com mais de 30
   caracteres. A leitura do resultado de um DataScan real com dimensão personalizada ainda não foi validada.
-- **Ainda não validado de ponta a ponta**: a execução real do instalador `deploy-gcp.sh` (só a sequência de
-  comandos foi conferida, com um `gcloud` simulado), o modo conta de serviço e o uso com identidades de privilégio
-  mínimo (a validação foi feita com um usuário administrador do projeto).
+- **Ainda não validado**: o login pelo navegador em um serviço criado pelo instalador (isto é, com
+  `GOOGLE_OAUTH_CLIENT_ID` definido) e a interface no modo conta de serviço — os testes do instalador foram
+  feitos por API; o modo OAuth com um usuário de privilégio mínimo (os testes usaram um administrador do
+  projeto); projetos com mais de 50 DataScans de qualidade.
 
 ---
 
