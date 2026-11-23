@@ -16,7 +16,7 @@
         "vigencia": "2026-01-01",
         "prazoAdequacao": "2026-12-31",
         "url": "https://www.bcb.gov.br/estabilidadefinanceira/exibenormativo?tipo=Resolu%C3%A7%C3%A3o%20Conjunta&numero=18",
-        "aviso": "Os indicadores deste painel são evidências técnicas de apoio à política de qualidade das informações da instituição. A Resolução não define métricas nem níveis mínimos por dimensão (o Banco Central do Brasil pode estabelecê-los — art. 10, I e II). O painel não atesta conformidade regulatória."
+        "aviso": "Os indicadores deste painel são evidências técnicas de apoio à política de qualidade das informações da instituição. A Resolução não define métricas nem níveis mínimos por dimensão (o Banco Central do Brasil pode estabelecê-los). O painel não atesta conformidade regulatória."
       },
       "escopo": {
         "criterio": "Tabelas com DataScan de qualidade de dados (Dataplex) no projeto e na localização selecionados",
@@ -45,6 +45,7 @@
             {
               "id": "tabelas_com_contatos",
               "rotulo": "Tabelas do escopo com contatos registrados no Knowledge Catalog (aspecto contacts)",
+              "rotuloCurto": "tabelas com contatos",
               "valorPct": 50,
               "numerador": 2,
               "denominador": 4,
@@ -90,6 +91,7 @@
             {
               "id": "regras_dq",
               "rotulo": "Regras de qualidade aprovadas (última execução dos DataScans)",
+              "rotuloCurto": "regras aprovadas",
               "valorPct": 66.67,
               "numerador": 2,
               "denominador": 3,
@@ -112,7 +114,7 @@
             "Dataplex DataScan (qualidade de dados)"
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY).",
-          "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos (art. 3º, V, \"a\").",
+          "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos.",
           "porRegrasPersonalizadas": false,
           "medicao": [
             {
@@ -172,6 +174,7 @@
             {
               "id": "colunas_descritas",
               "rotulo": "Colunas com descrição nas tabelas do escopo",
+              "rotuloCurto": "colunas com descrição",
               "valorPct": 60,
               "numerador": 9,
               "denominador": 15,
@@ -193,7 +196,7 @@
             "Knowledge Catalog (aspecto overview)"
           ],
           "comoEMedido": "Percentual de colunas com descrição nas tabelas do escopo.",
-          "lacuna": "Cobre apenas a documentação técnica (dicionário de dados — art. 3º, III, \"c\"). A clareza da informação entregue ao usuário não é avaliada.",
+          "lacuna": "Cobre apenas a documentação técnica (dicionário de dados). A clareza da informação entregue ao usuário não é avaliada.",
           "porRegrasPersonalizadas": false,
           "medicao": [
             {
@@ -227,6 +230,7 @@
             {
               "id": "regras_dq",
               "rotulo": "Regras de qualidade aprovadas (última execução dos DataScans)",
+              "rotuloCurto": "regras aprovadas",
               "valorPct": 100,
               "numerador": 1,
               "denominador": 1,
@@ -235,6 +239,7 @@
             {
               "id": "tabelas_com_termo_de_glossario",
               "rotulo": "Tabelas do escopo com termo de glossário vinculado (Knowledge Catalog)",
+              "rotuloCurto": "tabelas com termo de glossário",
               "valorPct": 50,
               "numerador": 2,
               "denominador": 4,
@@ -289,6 +294,7 @@
             {
               "id": "regras_dq",
               "rotulo": "Regras de qualidade aprovadas (última execução dos DataScans)",
+              "rotuloCurto": "regras aprovadas",
               "valorPct": 100,
               "numerador": 3,
               "denominador": 3,
@@ -337,6 +343,7 @@
             {
               "id": "regras_dq",
               "rotulo": "Regras de qualidade aprovadas (última execução dos DataScans)",
+              "rotuloCurto": "regras aprovadas",
               "valorPct": 50,
               "numerador": 1,
               "denominador": 2,
@@ -385,6 +392,7 @@
             {
               "id": "regras_dq",
               "rotulo": "Regras de qualidade aprovadas (última execução dos DataScans)",
+              "rotuloCurto": "regras aprovadas",
               "valorPct": 66.67,
               "numerador": 2,
               "denominador": 3,
@@ -433,6 +441,7 @@
             {
               "id": "regras_dq",
               "rotulo": "Regras de qualidade aprovadas (última execução dos DataScans)",
+              "rotuloCurto": "regras aprovadas",
               "valorPct": 100,
               "numerador": 1,
               "denominador": 1,
@@ -481,6 +490,7 @@
             {
               "id": "tabelas_com_origem",
               "rotulo": "Tabelas do escopo com origem registrada na Data Lineage API",
+              "rotuloCurto": "tabelas com origem registrada",
               "valorPct": 75,
               "numerador": 3,
               "denominador": 4,
@@ -522,6 +532,7 @@
             {
               "id": "tabelas_com_uso",
               "rotulo": "Tabelas do escopo com consultas registradas nos últimos 30 dias (aspecto usage do Knowledge Catalog)",
+              "rotuloCurto": "tabelas com consultas em 30 dias",
               "valorPct": 50,
               "numerador": 2,
               "denominador": 4,
@@ -568,6 +579,7 @@
             {
               "id": "regras_dq",
               "rotulo": "Regras de qualidade aprovadas (última execução dos DataScans)",
+              "rotuloCurto": "regras aprovadas",
               "valorPct": 100,
               "numerador": 1,
               "denominador": 1,
@@ -2001,7 +2013,7 @@
         "vigencia": "2026-01-01",
         "prazoAdequacao": "2026-12-31",
         "url": "https://www.bcb.gov.br/estabilidadefinanceira/exibenormativo?tipo=Resolu%C3%A7%C3%A3o%20Conjunta&numero=18",
-        "aviso": "Os indicadores deste painel são evidências técnicas de apoio à política de qualidade das informações da instituição. A Resolução não define métricas nem níveis mínimos por dimensão (o Banco Central do Brasil pode estabelecê-los — art. 10, I e II). O painel não atesta conformidade regulatória."
+        "aviso": "Os indicadores deste painel são evidências técnicas de apoio à política de qualidade das informações da instituição. A Resolução não define métricas nem níveis mínimos por dimensão (o Banco Central do Brasil pode estabelecê-los). O painel não atesta conformidade regulatória."
       },
       "escopo": {
         "criterio": "Tabelas com DataScan de qualidade de dados (Dataplex) no projeto e na localização selecionados",
@@ -2074,7 +2086,7 @@
             "Dataplex DataScan (qualidade de dados)"
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY).",
-          "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos (art. 3º, V, \"a\").",
+          "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos.",
           "porRegrasPersonalizadas": false,
           "medicao": [
             {
@@ -2141,7 +2153,7 @@
             "Knowledge Catalog (aspecto overview)"
           ],
           "comoEMedido": "Percentual de colunas com descrição nas tabelas do escopo.",
-          "lacuna": "Cobre apenas a documentação técnica (dicionário de dados — art. 3º, III, \"c\"). A clareza da informação entregue ao usuário não é avaliada.",
+          "lacuna": "Cobre apenas a documentação técnica (dicionário de dados). A clareza da informação entregue ao usuário não é avaliada.",
           "porRegrasPersonalizadas": false,
           "medicao": [
             {
@@ -2313,7 +2325,7 @@
           ],
           "fontes": [],
           "comoEMedido": null,
-          "lacuna": "Não há regras marcadas com a dimensão INTEGRIDADE no escopo. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, \"e\".",
+          "lacuna": "Não há regras marcadas com a dimensão INTEGRIDADE no escopo. Depende dos controles da instituição contra modificação não autorizada ou acidental e das suas trilhas de verificação.",
           "porRegrasPersonalizadas": false,
           "medicao": [
             {
@@ -2561,7 +2573,7 @@
         "vigencia": "2026-01-01",
         "prazoAdequacao": "2026-12-31",
         "url": "https://www.bcb.gov.br/estabilidadefinanceira/exibenormativo?tipo=Resolu%C3%A7%C3%A3o%20Conjunta&numero=18",
-        "aviso": "Os indicadores deste painel são evidências técnicas de apoio à política de qualidade das informações da instituição. A Resolução não define métricas nem níveis mínimos por dimensão (o Banco Central do Brasil pode estabelecê-los — art. 10, I e II). O painel não atesta conformidade regulatória."
+        "aviso": "Os indicadores deste painel são evidências técnicas de apoio à política de qualidade das informações da instituição. A Resolução não define métricas nem níveis mínimos por dimensão (o Banco Central do Brasil pode estabelecê-los). O painel não atesta conformidade regulatória."
       },
       "escopo": {
         "criterio": "Tabelas com DataScan de qualidade de dados (Dataplex) no projeto e na localização selecionados",
@@ -2634,7 +2646,7 @@
             "Dataplex DataScan (qualidade de dados)"
           ],
           "comoEMedido": "Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY).",
-          "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos (art. 3º, V, \"a\").",
+          "lacuna": "Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos.",
           "porRegrasPersonalizadas": false,
           "medicao": [
             {
@@ -2701,7 +2713,7 @@
             "Knowledge Catalog (aspecto overview)"
           ],
           "comoEMedido": "Percentual de colunas com descrição nas tabelas do escopo.",
-          "lacuna": "Cobre apenas a documentação técnica (dicionário de dados — art. 3º, III, \"c\"). A clareza da informação entregue ao usuário não é avaliada.",
+          "lacuna": "Cobre apenas a documentação técnica (dicionário de dados). A clareza da informação entregue ao usuário não é avaliada.",
           "porRegrasPersonalizadas": false,
           "medicao": [
             {
@@ -2873,7 +2885,7 @@
           ],
           "fontes": [],
           "comoEMedido": null,
-          "lacuna": "Não há regras marcadas com a dimensão INTEGRIDADE no escopo. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, \"e\".",
+          "lacuna": "Não há regras marcadas com a dimensão INTEGRIDADE no escopo. Depende dos controles da instituição contra modificação não autorizada ou acidental e das suas trilhas de verificação.",
           "porRegrasPersonalizadas": false,
           "medicao": [
             {

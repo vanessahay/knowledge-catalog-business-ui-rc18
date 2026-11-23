@@ -95,13 +95,31 @@ describe('RC18DimensionsOverview', () => {
   it('dimensão sem coleta não exibe percentual algum', () => {
     render(<RC18DimensionsOverview report={buildReport()} />);
     const card = screen.getByTestId('rc18-dimensao-confiabilidade');
-    expect(within(card).getByText('Não medido automaticamente')).toBeInTheDocument();
-    expect(within(card).getByText('Sem coleta automática para Confiabilidade.')).toBeInTheDocument();
+    expect(within(card).getByText('Não medido automaticamente')).toBeVisible();
+    expect(within(card).getByText('Sem indicador')).toBeVisible();
     expect(within(card).queryByText(/%/)).toBeNull();
-    // Sem indicador, a orientação de como medir já aparece aberta — e não há atalho para regras.
-    expect(within(card).getByText('Recurso de Confiabilidade:')).toBeInTheDocument();
-    expect(within(card).getByText('Como medir Confiabilidade.')).toBeInTheDocument();
-    expect(within(card).queryByRole('button', { name: /Ver as/ })).toBeNull();
+    // Não há atalho para regras; o motivo e a orientação de como medir ficam nos detalhes.
+    expect(within(card).queryByRole('button', { name: /Ver regras/ })).toBeNull();
+    const detalhes = within(card).getByTestId('rc18-detalhes-confiabilidade') as HTMLDetailsElement;
+    expect(detalhes.open).toBe(false);
+    const motivo = within(detalhes).getByText(/Sem coleta automática para Confiabilidade\./);
+    expect(motivo).not.toBeVisible();
+    expect(within(detalhes).getByText('Recurso de Confiabilidade:')).not.toBeVisible();
+    detalhes.open = true;
+    expect(within(detalhes).getByText('Por que não há indicador')).toBeVisible();
+    expect(motivo).toBeVisible();
+    expect(motivo).toHaveTextContent('marque regras de DataScan com a dimensão personalizada CONFIABILIDADE.');
+    expect(within(detalhes).getByText('Recurso de Confiabilidade:')).toBeVisible();
+    expect(within(detalhes).getByText(/Como medir Confiabilidade\./)).toBeVisible();
+  });
+
+  it('a tela não reproduz o texto da Resolução nem cita artigos', () => {
+    render(<RC18DimensionsOverview report={buildReport()} />);
+    const texto = document.body.textContent ?? '';
+    // `definicao` e `dispositivoDimensoes` continuam na resposta da API, mas não são exibidos.
+    expect(texto).not.toContain('definição de');
+    expect(texto).not.toMatch(/\bart\.\s*\d|§/i);
+    expect(screen.getByRole('link', { name: 'Texto do normativo' })).toHaveAttribute('href', 'https://www.bcb.gov.br/');
   });
 
   it('dimensão medida exibe o indicador com numerador e denominador', () => {
@@ -110,21 +128,78 @@ describe('RC18DimensionsOverview', () => {
         coleta: 'automatica',
         estado: 'medido',
         indicadores: [
-          { id: 'regras_dq', rotulo: 'Regras aprovadas', valorPct: 92.65, numerador: 63, denominador: 68, unidade: 'regras' },
+          {
+            id: 'regras_dq',
+            rotulo: 'Regras aprovadas na última execução',
+            rotuloCurto: 'regras aprovadas',
+            valorPct: 92.65,
+            numerador: 63,
+            denominador: 68,
+            unidade: 'regras',
+          },
         ],
         regras: { total: 70, executadas: 68, aprovadas: 63, reprovadas: 5, naoExecutadas: 2 },
+        fontes: ['Dataplex DataScan'],
+        evidencias: [
+          { rotulo: 'Regras: execução mais recente', valor: '2026-01-15T08:03:36.000Z' },
+          { rotulo: 'Item 2', valor: 'b' },
+          { rotulo: 'Item 3', valor: 'c' },
+          { rotulo: 'Item 4', valor: 'd' },
+        ],
       },
     });
     render(<RC18DimensionsOverview report={report} />);
     const card = screen.getByTestId('rc18-dimensao-acuracia');
-    expect(within(card).getByText('92,65%')).toBeInTheDocument();
-    expect(within(card).getByText('63 de 68 regras — Regras aprovadas')).toBeInTheDocument();
-    expect(within(card).getByText('2 regra(s) configurada(s) sem execução — fora do cálculo.')).toBeInTheDocument();
-    expect(within(card).getByText('Medido')).toBeInTheDocument();
-    // Dimensão medida: a orientação fica recolhida até ser pedida.
-    expect(within(card).queryByText('Recurso de Acurácia:')).toBeNull();
-    fireEvent.click(within(card).getByRole('button', { name: 'Como medir no Google Cloud' }));
-    expect(within(card).getByText('Recurso de Acurácia:')).toBeInTheDocument();
+    // À vista: situação, percentual e a legenda curta (com as regras fora do cálculo).
+    expect(within(card).getByText('Medido')).toBeVisible();
+    expect(within(card).getByText('92,65%')).toBeVisible();
+    expect(within(card).getByText('63 de 68 regras aprovadas · 2 sem execução')).toBeVisible();
+
+    // Em "Ver detalhes", fechado por padrão: o que é medido, coleta, limite, evidências e como medir.
+    const detalhes = within(card).getByTestId('rc18-detalhes-acuracia') as HTMLDetailsElement;
+    expect(detalhes.open).toBe(false);
+    expect(within(detalhes).getByText('Ver detalhes')).toBeInTheDocument();
+    const limite = within(detalhes).getByText('Sem coleta automática para Acurácia.');
+    expect(limite).not.toBeVisible();
+    detalhes.open = true;
+    for (const rotulo of ['O que é medido', 'Coleta', 'Limite do indicador', 'Evidências', 'Dimensões de DataScan agregadas', 'Como medir no Google Cloud']) {
+      expect(within(detalhes).getByText(rotulo)).toBeVisible();
+    }
+    expect(limite).toBeVisible();
+    expect(within(detalhes).getByText('Regras aprovadas na última execução')).toBeVisible();
+    expect(within(detalhes).getByText('2 regra(s) configurada(s) sem execução — fora do cálculo.')).toBeVisible();
+    expect(within(detalhes).getByText('Regras de qualidade (DataScans) • Dataplex DataScan')).toBeVisible();
+    expect(within(detalhes).getByText('Regras: execução mais recente: 15/01/2026 08:03 UTC')).toBeVisible();
+    expect(within(detalhes).getByText('e mais 1 item(ns).')).toBeVisible();
+    expect(within(detalhes).getByText('ACURACIA')).toBeVisible();
+    expect(within(detalhes).getByText('Recurso de Acurácia:')).toBeVisible();
+    expect(within(detalhes).queryByText('Por que não há indicador')).toBeNull();
+  });
+
+  it('indicador sem legenda curta usa a unidade e a descrição completa', () => {
+    const report = buildReport({
+      clareza: {
+        coleta: 'parcial',
+        estado: 'medido',
+        indicadores: [{ id: 'colunas_descritas', rotulo: 'Colunas com descrição', valorPct: 60, numerador: 1200, denominador: 2000, unidade: 'colunas' }],
+      },
+    });
+    render(<RC18DimensionsOverview report={report} />);
+    expect(within(screen.getByTestId('rc18-dimensao-clareza')).getByText('1.200 de 2.000 colunas — Colunas com descrição')).toBeVisible();
+  });
+
+  it('regras configuradas e nunca executadas: sem percentual, com o atalho para as regras', () => {
+    const onShowRules = vi.fn();
+    const report = buildReport({
+      adaptabilidade: { regras: { total: 2, executadas: 0, aprovadas: 0, reprovadas: 0, naoExecutadas: 2 } },
+    });
+    render(<RC18DimensionsOverview report={report} onShowRules={onShowRules} />);
+    const card = screen.getByTestId('rc18-dimensao-adaptabilidade');
+    expect(within(card).getByText('Sem indicador')).toBeVisible();
+    expect(within(card).getByText('2 regra(s) sem execução')).toBeVisible();
+    expect(within(card).queryByText(/%/)).toBeNull();
+    fireEvent.click(within(card).getByRole('button', { name: 'Ver regras de Adaptabilidade' }));
+    expect(onShowRules).toHaveBeenCalledWith('adaptabilidade');
   });
 
   it('dimensão com regras oferece o atalho para a lista de regras', () => {
@@ -138,8 +213,13 @@ describe('RC18DimensionsOverview', () => {
       },
     });
     render(<RC18DimensionsOverview report={report} onShowRules={onShowRules} />);
-    fireEvent.click(within(screen.getByTestId('rc18-dimensao-integridade')).getByRole('button', { name: 'Ver as 3 regra(s) desta dimensão' }));
+    const card = screen.getByTestId('rc18-dimensao-integridade');
+    const atalho = within(card).getByRole('button', { name: 'Ver regras de Integridade' });
+    expect(atalho).toHaveTextContent('Ver regras');
+    fireEvent.click(atalho);
     expect(onShowRules).toHaveBeenCalledWith('integridade');
+    // Dimensão medida só por regras personalizadas: a coleta informada nos detalhes é essa.
+    expect(within(card).getByText('Regras de DataScan marcadas com a dimensão personalizada')).toBeInTheDocument();
   });
 
   it('avisa quando não há escopo e não atesta conformidade', () => {

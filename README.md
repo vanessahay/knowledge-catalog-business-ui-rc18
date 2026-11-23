@@ -40,13 +40,18 @@ Nada é preenchido com valores presumidos: o que não foi medido aparece como "s
 - **Automática**: o indicador é a razão *regras aprovadas / regras executadas* na última execução dos DataScans — o
   mesmo critério do score do Dataplex. Regras configuradas e ainda não executadas ficam fora do cálculo e são
   contadas à parte.
-- **Parcial**: o indicador cobre só parte da definição da dimensão; o cartão informa o limite de cada um.
+- **Parcial**: o indicador cobre só parte da definição da dimensão; o limite de cada um aparece em "Ver
+  detalhes".
 - **Regras personalizadas**: a dimensão não tem fonte automática. O indicador vem das regras de DataScan que a
   instituição marca com a dimensão personalizada correspondente; sem essas regras, a dimensão aparece como "não
   medido automaticamente". O [kit RC 18](rc18-kit/README.md) traz regras de exemplo para cada uma.
 
-Cada cartão de dimensão indica com que recursos do Google Cloud a evidência é produzida ("Como medir no Google
-Cloud") e, quando há regras, leva à lista delas.
+Cada cartão de dimensão mostra só o nome, a situação e o indicador. "Ver detalhes" abre o que é medido, a coleta,
+o limite do indicador, as evidências e os recursos do Google Cloud com que a evidência é produzida; "Ver regras"
+leva à lista de regras da dimensão.
+
+A tela não reproduz o texto da Resolução nem cita artigos: o link "Texto do normativo" leva ao normativo. A
+definição literal de cada dimensão continua na resposta da API e no arquivo de evidências.
 
 O painel tem cinco visões: **12 dimensões**, **Qualidade por tabela** (todas as regras dos DataScans, agrupadas
 pela dimensão da Resolução, com nome, descrição e resultado de cada uma), **Dados sensíveis** (complementar — não
@@ -319,8 +324,8 @@ O teste do backend gera as respostas que o teste do frontend renderiza
 - Adaptabilidade, confiabilidade e integridade não têm fonte automática: só aparecem com indicador quando há
   regras marcadas com a dimensão personalizada. O painel lê o resultado dessas regras; ele não executa os testes
   nem confere se os registros de controle que elas consultam estão completos.
-- O indicador de regras junta a última execução de cada DataScan; o cartão mostra a data mais recente e a mais
-  antiga entre elas.
+- O indicador de regras junta a última execução de cada DataScan; "Ver detalhes" mostra a data mais recente e a
+  mais antiga entre elas.
 - O instalador não remove papéis: se uma instalação no modo conta de serviço for refeita no modo OAuth do
   usuário, os papéis já concedidos à conta de serviço do runtime permanecem e devem ser removidos manualmente.
 - A visão de dados sensíveis usa Policy Tags (fato) e o nome das colunas (heurística); não inspeciona conteúdo. A

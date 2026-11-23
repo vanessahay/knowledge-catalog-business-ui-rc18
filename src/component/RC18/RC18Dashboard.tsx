@@ -399,7 +399,7 @@ const RC18Dashboard: React.FC = () => {
             Painel — Qualidade das Informações (Resolução Conjunta nº 18/2025)
           </Typography>
           <Typography variant="subtitle1" sx={{ opacity: 0.9, marginTop: '6px', fontSize: '15px' }}>
-            Evidências técnicas das 12 dimensões do art. 2º, § 2º — Dataplex, Knowledge Catalog, Data Lineage e BigQuery
+            Evidências técnicas das 12 dimensões de qualidade da informação — Dataplex, Knowledge Catalog, Data Lineage e BigQuery
           </Typography>
         </Box>
         <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} sx={{ flexShrink: 0, marginLeft: '16px' }}>
@@ -531,7 +531,7 @@ const RC18Dashboard: React.FC = () => {
               borderColor: '#DADCE0'
             }}
           >
-            12 dimensões (art. 2º, § 2º)
+            12 dimensões
           </Button>
           <Button
             fullWidth
@@ -585,7 +585,7 @@ const RC18Dashboard: React.FC = () => {
               borderColor: '#DADCE0'
             }}
           >
-            Rastreabilidade (inciso X)
+            Rastreabilidade
           </Button>
           <Button
             fullWidth
@@ -906,10 +906,10 @@ const RC18Dashboard: React.FC = () => {
               )}
               {/* Lineage Summary Cards */}
               <Grid container spacing={3} sx={{ marginBottom: '28px' }}>
-                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <Grid size={{ xs: 12, md: 4 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      TABELAS COM ORIGEM REGISTRADA (INCISO X)
+                      TABELAS COM ORIGEM REGISTRADA
                     </Typography>
                     <Typography variant="h3" sx={{ fontWeight: 800, color: '#022FCD', my: 1 }}>
                       {formatPct(lineageData?.summary?.traceabilityCoveragePct)}
@@ -920,7 +920,7 @@ const RC18Dashboard: React.FC = () => {
                   </Card>
                 </Grid>
 
-                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <Grid size={{ xs: 12, md: 4 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
                       PROCESSOS REGISTRADOS
@@ -934,7 +934,7 @@ const RC18Dashboard: React.FC = () => {
                   </Card>
                 </Grid>
 
-                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+                <Grid size={{ xs: 12, md: 4 }}>
                   <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
                     <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
                       DESTINOS REGISTRADOS
@@ -944,20 +944,6 @@ const RC18Dashboard: React.FC = () => {
                     </Typography>
                     <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
                       Ativos a jusante na Data Lineage API
-                    </Typography>
-                  </Card>
-                </Grid>
-
-                <Grid size={{ xs: 12, sm: 6, md: 3 }}>
-                  <Card sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', padding: '16px' }}>
-                    <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 600 }}>
-                      DISPOSITIVO
-                    </Typography>
-                    <Typography variant="h6" sx={{ fontWeight: 800, color: '#1F1F1F', my: 1 }}>
-                      Art. 2º, § 2º, X
-                    </Typography>
-                    <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
-                      Indicador técnico; não atesta conformidade
                     </Typography>
                   </Card>
                 </Grid>
@@ -1305,8 +1291,7 @@ const RC18Dashboard: React.FC = () => {
                   <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px' }}>
                     Aspectos lidos com GetEntry (contatos, documentação, uso e scorecard), vínculos com termos de glossário
                     (lookupEntryLinks) e regras de qualidade vindas dos DataScans. Contatos alimentam o indicador de
-                    acessibilidade (inciso I); termos de glossário, o de comparabilidade (inciso V); consultas, o de
-                    relevância (inciso XI).
+                    acessibilidade; termos de glossário, o de comparabilidade; consultas, o de relevância.
                   </Typography>
                 </Box>
                 <TableContainer>

@@ -29,16 +29,22 @@ const abrirAba = (nome: RegExp | string) => fireEvent.click(screen.getByRole('ta
 
 // O painel descreve evidências; não pode atestar conformidade nem classificar risco.
 const TERMOS_VEDADOS = /\bConforme\b|Auditado|Adequado|Nível de Risco|CADOC|Certificad/;
-const semTermosVedados = () => expect(document.body.textContent ?? '').not.toMatch(TERMOS_VEDADOS);
+// A tela não cita artigos nem parágrafos do normativo: a referência é o link "Texto do normativo".
+const CITACAO_DE_ARTIGO = /\bart\.\s*\d|§/i;
+const semTermosVedados = () => {
+  const texto = document.body.textContent ?? '';
+  expect(texto).not.toMatch(TERMOS_VEDADOS);
+  expect(texto).not.toMatch(CITACAO_DE_ARTIGO);
+};
 
 // Folga para a suíte completa, que roda os arquivos em paralelo (o padrão do Vitest é 5 s).
 vi.setConfig({ testTimeout: 20000 });
 
 const VISOES = [
-  /12 dimensões/,
+  '12 dimensões',
   'Qualidade por tabela',
   /Dados sensíveis/,
-  /Rastreabilidade \(inciso X\)/,
+  'Rastreabilidade',
   /Knowledge Catalog \(contexto\)/,
 ] as const;
 
@@ -73,55 +79,97 @@ describe('RC18Dashboard', () => {
     expect(rids.size).toBe(1);
   });
 
-  it('mostra indicadores com numerador e denominador e não inventa percentual para o que não mede', async () => {
+  it('cartões enxutos: nome, situação e indicador à vista; não inventa percentual para o que não mede', async () => {
     responder(respostas.demo);
     render(<RC18Dashboard />);
 
     const acessibilidade = await screen.findByTestId('rc18-dimensao-acessibilidade');
-    expect(within(acessibilidade).getByText('50%')).toBeInTheDocument();
-    expect(within(acessibilidade).getByText(/2 de 4 tabelas — Tabelas do escopo com contatos registrados/)).toBeInTheDocument();
+    expect(within(acessibilidade).getByText('50%')).toBeVisible();
+    expect(within(acessibilidade).getByText('2 de 4 tabelas com contatos')).toBeVisible();
 
     const relevancia = screen.getByTestId('rc18-dimensao-relevancia');
-    expect(within(relevancia).getByText(/2 de 4 tabelas — Tabelas do escopo com consultas registradas/)).toBeInTheDocument();
-    expect(within(relevancia).getByText(/Limite do indicador: O uso técnico da tabela não comprova/)).toBeInTheDocument();
+    expect(within(relevancia).getByText('2 de 4 tabelas com consultas em 30 dias')).toBeVisible();
 
+    // Regras configuradas e ainda não executadas ficam fora do cálculo e aparecem ao lado do indicador.
     const acuracia = screen.getByTestId('rc18-dimensao-acuracia');
-    expect(within(acuracia).getByText('66,67%')).toBeInTheDocument();
-    expect(within(acuracia).getByText(/1 regra\(s\) configurada\(s\) sem execução/)).toBeInTheDocument();
-
-    // Dimensão sem coletor, medida por regra marcada com a dimensão personalizada.
-    const integridade = screen.getByTestId('rc18-dimensao-integridade');
-    expect(within(integridade).getByText('100%')).toBeInTheDocument();
-    expect(within(integridade).getByText(/Coleta: regras de DataScan marcadas com a dimensão personalizada/)).toBeInTheDocument();
-    expect(within(integridade).getByText(/Limite do indicador: Reflete apenas as regras que a instituição marcou/)).toBeInTheDocument();
-    expect(within(integridade).queryByText(/Sem coleta automática/)).toBeNull();
+    expect(within(acuracia).getByText('66,67%')).toBeVisible();
+    expect(within(acuracia).getByText('2 de 3 regras aprovadas · 1 sem execução')).toBeVisible();
 
     // Confiabilidade: medida por regras que comparam a versão revisada com a informada.
     const confiabilidade = screen.getByTestId('rc18-dimensao-confiabilidade');
-    expect(within(confiabilidade).getByText('50%')).toBeInTheDocument();
-    expect(within(confiabilidade).getByText(/1 de 2 regras — Regras de qualidade aprovadas/)).toBeInTheDocument();
+    expect(within(confiabilidade).getByText('50%')).toBeVisible();
+    expect(within(confiabilidade).getByText('1 de 2 regras aprovadas')).toBeVisible();
 
     // Comparabilidade: regras marcadas com a dimensão e termos de glossário vinculados.
     const comparabilidade = screen.getByTestId('rc18-dimensao-comparabilidade');
-    expect(within(comparabilidade).getByText(/1 de 1 regras — Regras de qualidade aprovadas/)).toBeInTheDocument();
-    expect(within(comparabilidade).getByText(/2 de 4 tabelas — Tabelas do escopo com termo de glossário vinculado/)).toBeInTheDocument();
+    expect(within(comparabilidade).getByText('1 de 1 regras aprovadas')).toBeVisible();
+    expect(within(comparabilidade).getByText('2 de 4 tabelas com termo de glossário')).toBeVisible();
 
-    // Dimensão sem regras marcadas: sem percentual, e o caminho para medir já aparece aberto.
+    // Dimensão sem regras marcadas: sem percentual.
     const adaptabilidade = screen.getByTestId('rc18-dimensao-adaptabilidade');
-    expect(within(adaptabilidade).getByText('Não medido automaticamente')).toBeInTheDocument();
+    expect(within(adaptabilidade).getByText('Não medido automaticamente')).toBeVisible();
+    expect(within(adaptabilidade).getByText('Sem indicador')).toBeVisible();
     expect(within(adaptabilidade).queryByText(/%/)).toBeNull();
-    expect(within(adaptabilidade).getByText(/marque regras de DataScan com a dimensão personalizada/)).toBeInTheDocument();
-    const medicao = within(adaptabilidade).getByTestId('rc18-medicao-adaptabilidade');
-    expect(within(medicao).getByText('BigQuery — tabela de controle:')).toBeInTheDocument();
-    expect(within(medicao).getByText('Dataplex — regras de qualidade (ADAPTABILIDADE):')).toBeInTheDocument();
 
-    // Dimensão já medida: a orientação fica recolhida até ser pedida.
-    expect(within(acuracia).queryByTestId('rc18-medicao-acuracia')).toBeNull();
-    fireEvent.click(within(acuracia).getByRole('button', { name: 'Como medir no Google Cloud' }));
-    expect(within(acuracia).getByTestId('rc18-medicao-acuracia')).toBeInTheDocument();
+    // A tela não reproduz o texto da Resolução (a definição de cada dimensão) nem cita artigos.
+    const texto = document.body.textContent ?? '';
+    expect(texto).not.toContain('condições que permitam aos usuários obter informações');
+    expect(texto).not.toContain('ausência de desvio relevante nos dados revisados');
+    expect(screen.getByRole('link', { name: 'Texto do normativo' })).toBeVisible();
 
     expect(screen.getByText('Dados de exemplo (sintéticos) — não representam o projeto')).toBeInTheDocument();
     expect(screen.getByText(/não atesta conformidade regulatória/)).toBeInTheDocument();
+    semTermosVedados();
+  });
+
+  it('"Ver detalhes": coleta, limite do indicador e como medir ficam fechados até serem pedidos', async () => {
+    responder(respostas.demo);
+    render(<RC18Dashboard />);
+    await screen.findByTestId('rc18-dimensao-acuracia');
+
+    // Os 12 cartões começam fechados.
+    const todos = screen.getAllByTestId(/^rc18-detalhes-/) as HTMLDetailsElement[];
+    expect(todos).toHaveLength(12);
+    expect(todos.every((d) => !d.open)).toBe(true);
+
+    // Indicador parcial: descrição completa do que é medido, fonte e limite.
+    const relevancia = screen.getByTestId('rc18-detalhes-relevancia') as HTMLDetailsElement;
+    const limite = within(relevancia).getByText(/O uso técnico da tabela não comprova/);
+    expect(limite).not.toBeVisible();
+    relevancia.open = true;
+    expect(limite).toBeVisible();
+    expect(within(relevancia).getByText('Limite do indicador')).toBeVisible();
+    expect(within(relevancia).getByText(/Tabelas do escopo com consultas registradas nos últimos 30 dias/)).toBeVisible();
+    expect(within(relevancia).getByText('Indicador técnico parcial • Knowledge Catalog (aspecto usage)')).toBeVisible();
+    expect(within(relevancia).getByText('Tabelas sem métrica de uso informada pelo catálogo: 1 de 4')).toBeVisible();
+    // Abrir um cartão não abre os outros.
+    expect((screen.getByTestId('rc18-detalhes-acuracia') as HTMLDetailsElement).open).toBe(false);
+
+    // Regras fora do cálculo e data da execução.
+    const acuracia = screen.getByTestId('rc18-detalhes-acuracia') as HTMLDetailsElement;
+    acuracia.open = true;
+    expect(within(acuracia).getByText('1 regra(s) configurada(s) sem execução — fora do cálculo.')).toBeVisible();
+    expect(within(acuracia).getByText('Regras: execução mais recente: 15/01/2026 08:03 UTC')).toBeVisible();
+    expect(within(acuracia).getByText('ACCURACY, VALIDITY, ACURACIA')).toBeVisible();
+    expect(within(acuracia).getByTestId('rc18-medicao-acuracia')).toBeVisible();
+
+    // Dimensão medida só por regra marcada com a dimensão personalizada.
+    const integridade = screen.getByTestId('rc18-detalhes-integridade') as HTMLDetailsElement;
+    integridade.open = true;
+    expect(within(integridade).getByText('Regras de DataScan marcadas com a dimensão personalizada')).toBeVisible();
+    expect(within(integridade).getByText(/Reflete apenas as regras que a instituição marcou/)).toBeVisible();
+    expect(within(integridade).queryByText(/Sem coleta automática/)).toBeNull();
+
+    // Dimensão sem indicador: o motivo e o caminho para medir.
+    const adaptabilidade = screen.getByTestId('rc18-detalhes-adaptabilidade') as HTMLDetailsElement;
+    const comoIncluir = within(adaptabilidade).getByText(/marque regras de DataScan com a dimensão personalizada/);
+    expect(comoIncluir).not.toBeVisible();
+    adaptabilidade.open = true;
+    expect(within(adaptabilidade).getByText('Por que não há indicador')).toBeVisible();
+    expect(comoIncluir).toBeVisible();
+    const medicao = within(adaptabilidade).getByTestId('rc18-medicao-adaptabilidade');
+    expect(within(medicao).getByText('BigQuery — tabela de controle:')).toBeVisible();
+    expect(within(medicao).getByText('Dataplex — regras de qualidade (ADAPTABILIDADE):')).toBeVisible();
     semTermosVedados();
   });
 
@@ -190,14 +238,14 @@ describe('RC18Dashboard', () => {
   it('do cartão da dimensão para as regras: abre a lista já filtrada', async () => {
     await abrirPainel(respostas.demo);
     const integridade = screen.getByTestId('rc18-dimensao-integridade');
-    fireEvent.click(within(integridade).getByRole('button', { name: 'Ver as 1 regra(s) desta dimensão' }));
+    fireEvent.click(within(integridade).getByRole('button', { name: 'Ver regras de Integridade' }));
     expect(screen.getByTestId('rc18-regras-contagem')).toHaveTextContent('1 de 16 regras');
     const regras = screen.getByTitle('Regras de qualidade');
     expect(within(regras).getByText('hash-de-carga-confere')).toBeInTheDocument();
     expect(within(regras).getByText('IX — Integridade')).toBeInTheDocument();
     // Dimensão sem regras não oferece o atalho.
-    abrirVisao(/12 dimensões/);
-    expect(within(screen.getByTestId('rc18-dimensao-adaptabilidade')).queryByRole('button', { name: /Ver as/ })).toBeNull();
+    abrirVisao('12 dimensões');
+    expect(within(screen.getByTestId('rc18-dimensao-adaptabilidade')).queryByRole('button', { name: /Ver regras/ })).toBeNull();
   });
 
   it('visão "Dados sensíveis": complementar, factual e sem classificação de risco', async () => {
@@ -213,7 +261,7 @@ describe('RC18Dashboard', () => {
 
   it('visão "Rastreabilidade": cobertura, origens, processos e destinos registrados', async () => {
     await abrirPainel(respostas.demo);
-    abrirVisao(/Rastreabilidade \(inciso X\)/);
+    abrirVisao('Rastreabilidade');
     expect(screen.getByText('75%')).toBeInTheDocument();
     expect(screen.getByText('3 de 4 tabelas do escopo')).toBeInTheDocument();
     expect(screen.getAllByText('Sem origem registrada').length).toBeGreaterThan(0);
@@ -258,7 +306,7 @@ describe('RC18Dashboard', () => {
     expect(screen.getByText('Nenhuma tabela inspecionada')).toBeInTheDocument();
     expect(screen.queryByTestId('CheckCircleIcon')).toBeNull();
 
-    abrirVisao(/Rastreabilidade \(inciso X\)/);
+    abrirVisao('Rastreabilidade');
     expect(screen.getByText('Não há tabelas no escopo para consultar na Data Lineage API.')).toBeInTheDocument();
 
     abrirVisao(/Knowledge Catalog \(contexto\)/);

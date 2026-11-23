@@ -5,7 +5,10 @@
 
 export interface Rc18Indicator {
   id: string;
+  /** Descrição completa do que é medido (mostrada em "Ver detalhes"). */
   rotulo: string;
+  /** Legenda curta para a face do cartão: "<numerador> de <denominador> <rotuloCurto>". */
+  rotuloCurto?: string;
   valorPct: number | null;
   numerador: number;
   denominador: number;

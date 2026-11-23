@@ -4,7 +4,12 @@
  * Catálogo das 12 dimensões de qualidade da informação da
  * Resolução Conjunta nº 18, de 28 de novembro de 2025 (art. 2º, § 2º, incisos I a XII).
  *
- * - `definicao` é transcrição literal do normativo. Não parafrasear.
+ * - `definicao` é transcrição literal do normativo. Não parafrasear. Ela e
+ *   `NORMA.dispositivoDimensoes` ficam na resposta da API e no arquivo de evidências; a tela do
+ *   painel não as exibe.
+ * - Os textos exibidos na tela (`NORMA.aviso`, `comoEMedido`, `lacuna`, `fontes`, `medicao`) não
+ *   citam artigos, parágrafos ou incisos: a referência ao normativo é o link do aviso da tela
+ *   (`NORMA.url`).
  * - `coleta` descreve o que ESTA versão do painel consegue observar por API:
  *     'automatica'   -> indicador calculado a partir de regras de qualidade (Dataplex DataScans);
  *     'parcial'      -> indicador técnico que cobre apenas parte da definição (metadados do
@@ -29,7 +34,7 @@ const NORMA = Object.freeze({
   prazoAdequacao: '2026-12-31',
   url: 'https://www.bcb.gov.br/estabilidadefinanceira/exibenormativo?tipo=Resolu%C3%A7%C3%A3o%20Conjunta&numero=18',
   aviso:
-    'Os indicadores deste painel são evidências técnicas de apoio à política de qualidade das informações da instituição. A Resolução não define métricas nem níveis mínimos por dimensão (o Banco Central do Brasil pode estabelecê-los — art. 10, I e II). O painel não atesta conformidade regulatória.',
+    'Os indicadores deste painel são evidências técnicas de apoio à política de qualidade das informações da instituição. A Resolução não define métricas nem níveis mínimos por dimensão (o Banco Central do Brasil pode estabelecê-los). O painel não atesta conformidade regulatória.',
 });
 
 const DIMENSIONS = Object.freeze([
@@ -63,7 +68,7 @@ const DIMENSIONS = Object.freeze([
     comoEMedido:
       'Percentual de regras de qualidade aprovadas na última execução dos DataScans (dimensões ACCURACY e VALIDITY).',
     lacuna:
-      'Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos (art. 3º, V, "a").',
+      'Regras de validação são aproximações: a aderência à realidade também exige reconciliação com os sistemas internos.',
     medicao: [
       { recurso: 'Dataplex — regras de qualidade (ACCURACY, VALIDITY)', acao: 'Validar formato, faixa e domínio dos campos; reconciliar com o sistema de origem por meio de regra SQL que consulta a tabela de origem.' },
     ],
@@ -96,7 +101,7 @@ const DIMENSIONS = Object.freeze([
     fontes: ['BigQuery (metadados de tabelas e colunas)', 'Knowledge Catalog (aspecto overview)'],
     comoEMedido: 'Percentual de colunas com descrição nas tabelas do escopo.',
     lacuna:
-      'Cobre apenas a documentação técnica (dicionário de dados — art. 3º, III, "c"). A clareza da informação entregue ao usuário não é avaliada.',
+      'Cobre apenas a documentação técnica (dicionário de dados). A clareza da informação entregue ao usuário não é avaliada.',
     medicao: [
       { recurso: 'BigQuery — descrições', acao: 'Descrever tabelas e colunas (dicionário de dados).' },
       { recurso: 'Knowledge Catalog — aspecto overview', acao: 'Documentar o conteúdo e o uso da informação na entrada da tabela.' },
@@ -180,7 +185,7 @@ const DIMENSIONS = Object.freeze([
     fontes: [],
     comoEMedido: null,
     lacuna:
-      'Não há regras marcadas com a dimensão INTEGRIDADE no escopo. Depende dos controles da instituição contra modificação não autorizada ou acidental e das trilhas de verificação previstas no art. 3º, III, "e".',
+      'Não há regras marcadas com a dimensão INTEGRIDADE no escopo. Depende dos controles da instituição contra modificação não autorizada ou acidental e das suas trilhas de verificação.',
     medicao: [
       { recurso: 'BigQuery — hash por registro', acao: 'Gravar na carga um hash do conteúdo de cada registro.' },
       { recurso: 'Dataplex — regras de qualidade (INTEGRIDADE)', acao: 'Conferir o conteúdo com o hash e exigir revisão registrada para toda diferença em relação à versão informada.' },

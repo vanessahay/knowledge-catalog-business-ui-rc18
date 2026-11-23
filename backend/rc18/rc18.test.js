@@ -44,6 +44,36 @@ test('catálogo: 12 dimensões, incisos I a XII, na ordem do art. 2º, § 2º', 
   assert.equal(NORMA.dispositivoDimensoes, 'art. 2º, § 2º, incisos I a XII');
 });
 
+test('textos exibidos na tela não citam artigos, parágrafos ou incisos do normativo', () => {
+  // A referência ao normativo na tela é o link (`NORMA.url`). `definicao` e
+  // `dispositivoDimensoes` ficam só na resposta da API e no arquivo de evidências.
+  const citacao = /\bart\.\s*\d|§|\binciso\b/i;
+  assert.doesNotMatch(NORMA.aviso, citacao);
+  assert.match(NORMA.aviso, /não atesta conformidade regulatória/);
+  assert.match(NORMA.aviso, /não define métricas nem níveis mínimos/);
+  for (const d of DIMENSIONS) {
+    const textos = [d.lacuna, d.comoEMedido || '', ...d.fontes, ...d.medicao.flatMap((m) => [m.recurso, m.acao])];
+    for (const texto of textos) assert.doesNotMatch(texto, citacao, `${d.id}: ${texto}`);
+  }
+  // Os rótulos dos indicadores e das evidências também vão para a tela.
+  const report = buildDimensionReport({
+    rules: demoData.demoScans(PROJECT).flatMap(rulesFromScan),
+    tableMetadata: demoData.demoTableMetadata(PROJECT),
+    lineage: demoData.demoLineage(PROJECT),
+    catalog: demoData.demoCatalog(PROJECT),
+  });
+  for (const d of report.dimensoes) {
+    for (const ind of d.indicadores) {
+      assert.doesNotMatch(`${ind.rotulo} ${ind.rotuloCurto}`, citacao, d.id);
+      // Legenda curta: completa a frase "<numerador> de <denominador> ...".
+      assert.match(ind.rotuloCurto, /^(regras|tabelas|colunas) /, `${d.id}/${ind.id}`);
+      assert.ok(ind.rotuloCurto.startsWith(ind.unidade), `${d.id}/${ind.id}`);
+      assert.ok(ind.rotuloCurto.length <= 40, `${d.id}/${ind.id}`);
+    }
+    for (const ev of d.evidencias) assert.doesNotMatch(ev.rotulo, citacao, d.id);
+  }
+});
+
 test('catálogo: cada dimensão Dataplex pertence a uma única dimensão da Resolução', () => {
   const all = DIMENSIONS.flatMap((d) => d.dqDimensions);
   assert.equal(new Set(all).size, all.length);
@@ -195,6 +225,7 @@ test('relatório das 12 dimensões (dados de demonstração)', () => {
   assert.deepEqual(by.acuracia.indicadores[0], {
     id: 'regras_dq',
     rotulo: 'Regras de qualidade aprovadas (última execução dos DataScans)',
+    rotuloCurto: 'regras aprovadas',
     valorPct: 66.67,
     numerador: 2,
     denominador: 3,
@@ -231,6 +262,7 @@ test('relatório das 12 dimensões (dados de demonstração)', () => {
     {
       id: 'tabelas_com_contatos',
       rotulo: 'Tabelas do escopo com contatos registrados no Knowledge Catalog (aspecto contacts)',
+      rotuloCurto: 'tabelas com contatos',
       valorPct: 50,
       numerador: 2,
       denominador: 4,
@@ -316,6 +348,7 @@ test('glossário: vínculos de definição por tabela e por coluna; tabela não 
     {
       id: 'tabelas_com_termo_de_glossario',
       rotulo: 'Tabelas do escopo com termo de glossário vinculado (Knowledge Catalog)',
+      rotuloCurto: 'tabelas com termo de glossário',
       valorPct: 50,
       numerador: 1,
       denominador: 2,

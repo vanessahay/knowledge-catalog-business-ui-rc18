@@ -6,6 +6,9 @@
  * (aspectos e vínculos com termos de glossário).
  * Função pura: não chama APIs e não preenche lacunas com valores presumidos.
  *
+ * Cada indicador traz `rotulo` (descrição completa do que é medido) e `rotuloCurto`, usado na
+ * face do cartão: "<numerador> de <denominador> <rotuloCurto>".
+ *
  * estado de cada dimensão:
  *   'medido'     -> há pelo menos um indicador calculado a partir de dados coletados;
  *   'sem_dados'  -> existe coletor para a dimensão, mas nada foi encontrado no escopo;
@@ -57,6 +60,7 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
       indicadores.push({
         id: 'regras_dq',
         rotulo: 'Regras de qualidade aprovadas (última execução dos DataScans)',
+        rotuloCurto: 'regras aprovadas',
         valorPct: score.scorePct,
         numerador: score.rulesPassed,
         denominador: score.rulesExecuted,
@@ -77,6 +81,7 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
       indicadores.push({
         id: 'tabelas_com_termo_de_glossario',
         rotulo: 'Tabelas do escopo com termo de glossário vinculado (Knowledge Catalog)',
+        rotuloCurto: 'tabelas com termo de glossário',
         valorPct: round2((100 * withTerms) / okGlossary.length),
         numerador: withTerms,
         denominador: okGlossary.length,
@@ -91,6 +96,7 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
       indicadores.push({
         id: 'tabelas_com_contatos',
         rotulo: 'Tabelas do escopo com contatos registrados no Knowledge Catalog (aspecto contacts)',
+        rotuloCurto: 'tabelas com contatos',
         valorPct: round2((100 * withContacts) / okCatalog.length),
         numerador: withContacts,
         denominador: okCatalog.length,
@@ -103,6 +109,7 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
       indicadores.push({
         id: 'tabelas_com_uso',
         rotulo: 'Tabelas do escopo com consultas registradas nos últimos 30 dias (aspecto usage do Knowledge Catalog)',
+        rotuloCurto: 'tabelas com consultas em 30 dias',
         valorPct: round2((100 * withUsage) / okCatalog.length),
         numerador: withUsage,
         denominador: okCatalog.length,
@@ -121,6 +128,7 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
         indicadores.push({
           id: 'colunas_descritas',
           rotulo: 'Colunas com descrição nas tabelas do escopo',
+          rotuloCurto: 'colunas com descrição',
           valorPct: round2((100 * described) / totalColumns),
           numerador: described,
           denominador: totalColumns,
@@ -144,6 +152,7 @@ function buildDimensionReport({ rules = [], tableMetadata = [], lineage = [], ca
       indicadores.push({
         id: 'tabelas_com_origem',
         rotulo: 'Tabelas do escopo com origem registrada na Data Lineage API',
+        rotuloCurto: 'tabelas com origem registrada',
         valorPct: round2((100 * withUpstream) / okLineage.length),
         numerador: withUpstream,
         denominador: okLineage.length,
