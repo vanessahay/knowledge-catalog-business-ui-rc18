@@ -1,276 +1,232 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { render, screen, within, fireEvent } from '@testing-library/react';
 import RC18DimensionsOverview from './RC18DimensionsOverview';
-import {
-  type Rc18Dimension,
-  type Rc18DimensionsReport,
-  type Rc18Rule,
-  formatCount,
-  formatEvidenceValue,
-  formatPct,
-  ruleResultText,
-} from './rc18Types';
+import respostas from './__fixtures__/rc18-respostas.json';
+import type { Rc18OverviewResponse } from './rc18Types';
 
-const NOMES = [
-  ['acessibilidade', 'I', 'Acessibilidade'],
-  ['acuracia', 'II', 'Acurácia'],
-  ['adaptabilidade', 'III', 'Adaptabilidade'],
-  ['clareza', 'IV', 'Clareza'],
-  ['comparabilidade', 'V', 'Comparabilidade'],
-  ['completude', 'VI', 'Completude'],
-  ['confiabilidade', 'VII', 'Confiabilidade'],
-  ['consistencia', 'VIII', 'Consistência'],
-  ['integridade', 'IX', 'Integridade'],
-  ['rastreabilidade', 'X', 'Rastreabilidade'],
-  ['relevancia', 'XI', 'Relevância'],
-  ['tempestividade', 'XII', 'Tempestividade'],
-] as const;
+vi.setConfig({ testTimeout: 20000 });
 
-const baseDimension = (id: string, inciso: string, nome: string): Rc18Dimension => ({
-  id,
-  inciso,
-  nome,
-  definicao: `definição de ${nome}`,
-  coleta: 'declaratoria',
-  estado: 'nao_medido',
-  indicadores: [],
-  regras: { total: 0, executadas: 0, aprovadas: 0, reprovadas: 0, naoExecutadas: 0 },
-  dqDimensions: [id.toUpperCase()],
-  fontes: [],
-  comoEMedido: null,
-  lacuna: `Sem coleta automática para ${nome}.`,
-  medicao: [{ recurso: `Recurso de ${nome}`, acao: `Como medir ${nome}.` }],
-  evidencias: [],
-});
+const demoOverview = respostas.demo as unknown as Rc18OverviewResponse;
+const vazioOverview = respostas.vazio as unknown as Rc18OverviewResponse;
+const erroOverview = respostas.erroApi as unknown as Rc18OverviewResponse;
 
-const buildReport = (overrides: Partial<Record<string, Partial<Rc18Dimension>>> = {}): Rc18DimensionsReport => {
-  const dimensoes = NOMES.map(([id, inciso, nome]) => ({ ...baseDimension(id, inciso, nome), ...(overrides[id] ?? {}) }));
-  return {
-    success: true,
-    demo: false,
-    projectId: 'projeto-exemplo',
-    location: 'global',
-    identityMode: 'user',
-    timestamp: '2026-01-15T08:03:36.000Z',
-    norma: {
-      nome: 'Resolução Conjunta nº 18, de 28 de novembro de 2025',
-      emissores: 'Banco Central do Brasil e Conselho Monetário Nacional',
-      ementa: 'ementa',
-      dispositivoDimensoes: 'art. 2º, § 2º, incisos I a XII',
-      vigencia: '2026-01-01',
-      prazoAdequacao: '2026-12-31',
-      url: 'https://www.bcb.gov.br/',
-      aviso: 'O painel não atesta conformidade regulatória.',
-    },
-    escopo: {
-      criterio: 'Tabelas com DataScan de qualidade de dados',
-      tabelas: ['ds.tabela_a', 'ds.tabela_b'],
-      totalScansListados: 10,
-      scansDeQualidade: 2,
-      scansLidos: 2,
-      truncado: false,
-    },
-    dimensoes,
-    resumo: {
-      medidas: dimensoes.filter((d) => d.estado === 'medido').length,
-      semDados: dimensoes.filter((d) => d.estado === 'sem_dados').length,
-      naoMedidas: dimensoes.filter((d) => d.estado === 'nao_medido').length,
-    },
-    regrasSemMapeamento: [],
-    diagnostics: [],
-  };
-};
+const CITACAO_PROIBIDA = /\bart\.\s*\d|§|\bInciso\b/i;
+
+const renderOverview = (overview: Rc18OverviewResponse, handlers: Partial<Record<string, ReturnType<typeof vi.fn>>> = {}) =>
+  render(
+    <RC18DimensionsOverview
+      overview={overview}
+      onShowDimensionRules={handlers.onShowDimensionRules ?? vi.fn()}
+      onJumpToFailedRules={handlers.onJumpToFailedRules ?? vi.fn()}
+      onJumpToFailedTables={handlers.onJumpToFailedTables ?? vi.fn()}
+      onJumpToStaleTables={handlers.onJumpToStaleTables ?? vi.fn()}
+      onJumpToGovernanceGaps={handlers.onJumpToGovernanceGaps ?? vi.fn()}
+    />
+  );
 
 describe('RC18DimensionsOverview', () => {
-  it('mostra as 12 dimensões com o inciso correspondente', () => {
-    render(<RC18DimensionsOverview report={buildReport()} />);
-    for (const [id, inciso, nome] of NOMES) {
-      const card = screen.getByTestId(`rc18-dimensao-${id}`);
-      expect(within(card).getByRole('heading', { name: nome })).toBeInTheDocument();
-      expect(within(card).getByText(`Inciso ${inciso}`)).toBeInTheDocument();
+  it('separa Qualidade dos dados (8) e Governança no catálogo (4), sem Inciso nem texto normativo', () => {
+    renderOverview(demoOverview);
+
+    const dados = screen.getByTestId('rc18-dimensoes-dados');
+    const governanca = screen.getByTestId('rc18-dimensoes-governanca');
+    expect(within(dados).getAllByRole('heading', { level: 3 })).toHaveLength(8);
+    expect(within(governanca).getAllByRole('heading', { level: 3 })).toHaveLength(4);
+    expect(document.body.textContent ?? '').not.toMatch(CITACAO_PROIBIDA);
+  });
+
+  it('aciona os 4 KPIs da faixa de não conformidades com os destinos corretos', () => {
+    const onJumpToFailedRules = vi.fn();
+    const onJumpToFailedTables = vi.fn();
+    const onJumpToStaleTables = vi.fn();
+    const onJumpToGovernanceGaps = vi.fn();
+    renderOverview(demoOverview, { onJumpToFailedRules, onJumpToFailedTables, onJumpToStaleTables, onJumpToGovernanceGaps });
+
+    fireEvent.click(screen.getByTestId('rc18-kpi-regras-reprovadas'));
+    expect(onJumpToFailedRules).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('rc18-kpi-tabelas-afetadas'));
+    expect(onJumpToFailedTables).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('rc18-kpi-scans-desatualizados'));
+    expect(onJumpToStaleTables).toHaveBeenCalledTimes(1);
+
+    const lacunas = screen.getByTestId('rc18-kpi-lacunas-governanca');
+    expect(lacunas).toHaveTextContent('Tabelas sem contato, sem origem ou com colunas sem descrição');
+    fireEvent.click(lacunas);
+    expect(onJumpToGovernanceGaps).toHaveBeenCalledTimes(1);
+  });
+
+  it('mostra "Ver falhas" em dimensões reprovadas e "Ver regras" em Comparabilidade sem falhas mesmo com glossário <100%', () => {
+    const onShowDimensionRules = vi.fn();
+    renderOverview(demoOverview, { onShowDimensionRules });
+
+    const acuracia = screen.getByTestId('rc18-dimensao-acuracia');
+    fireEvent.click(within(acuracia).getByRole('button', { name: /Ver falhas de Acurácia/ }));
+    expect(onShowDimensionRules).toHaveBeenCalledWith('acuracia', true);
+
+    const comparabilidade = screen.getByTestId('rc18-dimensao-comparabilidade');
+    expect(within(comparabilidade).queryByRole('button', { name: /Ver falhas/ })).toBeNull();
+    fireEvent.click(within(comparabilidade).getByRole('button', { name: /Ver regras de Comparabilidade/ }));
+    expect(onShowDimensionRules).toHaveBeenCalledWith('comparabilidade', false);
+  });
+
+  it('abre e fecha a gaveta lateral de detalhes (diálogo com nome acessível) com fontes, lacuna e como medir no Google Cloud', () => {
+    const onShowDimensionRules = vi.fn();
+    renderOverview(demoOverview, { onShowDimensionRules });
+
+    const confiabilidade = screen.getByTestId('rc18-dimensao-confiabilidade');
+    fireEvent.click(within(confiabilidade).getByRole('button', { name: /Detalhes de Confiabilidade/ }));
+
+    const drawer = screen.getByRole('dialog', { name: 'Confiabilidade' });
+    expect(within(drawer).getByText(/Como medir no Google Cloud/i)).toBeVisible();
+    expect(within(drawer).getByText('CONFIABILIDADE')).toBeVisible();
+
+    fireEvent.click(within(drawer).getByRole('button', { name: /Ver 1 falha/i }));
+    expect(onShowDimensionRules).toHaveBeenCalledWith('confiabilidade', true);
+  });
+
+  it('gaveta com regras só suspensas não pede para "marcar regras" e indicador incompleto nunca aparece como 100%', () => {
+    const overview = JSON.parse(JSON.stringify(demoOverview)) as Rc18OverviewResponse;
+    const integridade = overview.dimensoes.find((d) => d.id === 'integridade')!;
+    integridade.indicadores = [];
+    integridade.estado = 'nao_medido';
+    integridade.situacao = 'nao_medido';
+    integridade.regras = { total: 0, executadas: 0, aprovadas: 0, reprovadas: 0, naoExecutadas: 0, suspensas: 1 };
+    integridade.lacuna =
+      'Há 1 regra(s) marcada(s) com esta dimensão no escopo, mas nenhuma foi executada na última execução dos DataScans (0 sem execução, 1 suspensa(s)).';
+    const clareza = overview.dimensoes.find((d) => d.id === 'clareza')!;
+    clareza.indicadores = [{ ...clareza.indicadores[0], valorPct: 100, numerador: 20000, denominador: 20001 }];
+
+    renderOverview(overview);
+
+    expect(within(screen.getByTestId('rc18-dimensao-clareza')).getByText('< 100%')).toBeVisible();
+
+    fireEvent.click(
+      within(screen.getByTestId('rc18-dimensao-integridade')).getByRole('button', { name: /Detalhes de Integridade/ })
+    );
+    const dialog = screen.getByRole('dialog', { name: 'Integridade' });
+    expect(within(dialog).getByText(/nenhuma foi executada/)).toBeVisible();
+    expect(within(dialog).queryByText(/Para incluir um indicador/)).toBeNull();
+  });
+
+  it('sem escopo exibe alerta e não fabrica percentuais', () => {
+    renderOverview(vazioOverview);
+
+    expect(screen.getByText(/Nenhum DataScan de qualidade de dados encontrado/)).toBeVisible();
+    const acuracia = screen.getByTestId('rc18-dimensao-acuracia');
+    expect(within(acuracia).getByText('Sem dados')).toBeVisible();
+    expect(within(acuracia).queryByText(/%/)).toBeNull();
+  });
+
+  it('não afirma o que não foi lido: DataScans sem leitura e governança não verificada aparecem como "—"', () => {
+    const semLeitura = JSON.parse(JSON.stringify(vazioOverview)) as Rc18OverviewResponse;
+    semLeitura.escopo = { ...semLeitura.escopo, scansDeQualidade: 3, scansLidos: 0 };
+    const primeiro = renderOverview(semLeitura);
+    expect(
+      screen.getByText('3 DataScan(s) de qualidade encontrado(s) no filtro atual, mas nenhum pôde ser lido. Veja os diagnósticos.')
+    ).toBeVisible();
+    expect(screen.queryByText(/Nenhum DataScan de qualidade de dados encontrado/)).toBeNull();
+    for (const id of ['regras-reprovadas', 'tabelas-afetadas', 'scans-desatualizados', 'lacunas-governanca']) {
+      expect(screen.getByTestId(`rc18-kpi-${id}`)).toHaveTextContent('—');
     }
-    expect(screen.getAllByRole('heading', { level: 3 })).toHaveLength(12);
+    primeiro.unmount();
+
+    const tabelas = demoOverview.escopo.tabelas.length;
+    const naoVerificada = JSON.parse(JSON.stringify(demoOverview)) as Rc18OverviewResponse;
+    naoVerificada.resumoNaoConformidades = {
+      ...naoVerificada.resumoNaoConformidades,
+      lacunasGovernanca: 0,
+      governancaNaoVerificada: tabelas,
+    };
+    const segundo = renderOverview(naoVerificada);
+    const kpiTodas = screen.getByTestId('rc18-kpi-lacunas-governanca');
+    expect(kpiTodas).toHaveTextContent('—');
+    expect(kpiTodas).toHaveTextContent(`${tabelas} não verificada(s)`);
+    segundo.unmount();
+
+    const parcial = JSON.parse(JSON.stringify(demoOverview)) as Rc18OverviewResponse;
+    parcial.resumoNaoConformidades = { ...parcial.resumoNaoConformidades, lacunasGovernanca: 0, governancaNaoVerificada: 1 };
+    renderOverview(parcial);
+    const kpiParcial = screen.getByTestId('rc18-kpi-lacunas-governanca');
+    expect(kpiParcial).not.toHaveTextContent('—');
+    expect(kpiParcial).toHaveTextContent('1 não verificada(s)');
   });
 
-  it('dimensão sem coleta não exibe percentual algum', () => {
-    render(<RC18DimensionsOverview report={buildReport()} />);
-    const card = screen.getByTestId('rc18-dimensao-confiabilidade');
-    expect(within(card).getByText('Não medido automaticamente')).toBeVisible();
-    expect(within(card).getByText('Sem indicador')).toBeVisible();
-    expect(within(card).queryByText(/%/)).toBeNull();
-    // Não há atalho para regras; o motivo e a orientação de como medir ficam nos detalhes.
-    expect(within(card).queryByRole('button', { name: /Ver regras/ })).toBeNull();
-    const detalhes = within(card).getByTestId('rc18-detalhes-confiabilidade') as HTMLDetailsElement;
-    expect(detalhes.open).toBe(false);
-    const motivo = within(detalhes).getByText(/Sem coleta automática para Confiabilidade\./);
-    expect(motivo).not.toBeVisible();
-    expect(within(detalhes).getByText('Recurso de Confiabilidade:')).not.toBeVisible();
-    detalhes.open = true;
-    expect(within(detalhes).getByText('Por que não há indicador')).toBeVisible();
-    expect(motivo).toBeVisible();
-    expect(motivo).toHaveTextContent('marque regras de DataScan com a dimensão personalizada CONFIABILIDADE.');
-    expect(within(detalhes).getByText('Recurso de Confiabilidade:')).toBeVisible();
-    expect(within(detalhes).getByText(/Como medir Confiabilidade\./)).toBeVisible();
-  });
+  it('sinaliza listagem não lida, leitura parcial e cobertura parcial sem a cor de "zero verificado"', () => {
+    const corDoPonto = (id: string) => getComputedStyle(screen.getByTestId(`rc18-kpi-${id}-ponto`)).backgroundColor;
+    const NEUTRO = 'rgb(87, 87, 87)';
+    const VERDE = 'rgb(18, 137, 55)';
+    const KPIS = ['regras-reprovadas', 'tabelas-afetadas', 'scans-desatualizados', 'lacunas-governanca'];
 
-  it('a tela não reproduz o texto da Resolução nem cita artigos', () => {
-    render(<RC18DimensionsOverview report={buildReport()} />);
-    const texto = document.body.textContent ?? '';
-    // `definicao` e `dispositivoDimensoes` continuam na resposta da API, mas não são exibidos.
-    expect(texto).not.toContain('definição de');
-    expect(texto).not.toMatch(/\bart\.\s*\d|§/i);
-    expect(screen.getByRole('link', { name: 'Texto do normativo' })).toHaveAttribute('href', 'https://www.bcb.gov.br/');
-  });
-
-  it('dimensão medida exibe o indicador com numerador e denominador', () => {
-    const report = buildReport({
-      acuracia: {
-        coleta: 'automatica',
-        estado: 'medido',
-        indicadores: [
-          {
-            id: 'regras_dq',
-            rotulo: 'Regras aprovadas na última execução',
-            rotuloCurto: 'regras aprovadas',
-            valorPct: 92.65,
-            numerador: 63,
-            denominador: 68,
-            unidade: 'regras',
-          },
-        ],
-        regras: { total: 70, executadas: 68, aprovadas: 63, reprovadas: 5, naoExecutadas: 2 },
-        fontes: ['Dataplex DataScan'],
-        evidencias: [
-          { rotulo: 'Regras: execução mais recente', valor: '2026-01-15T08:03:36.000Z' },
-          { rotulo: 'Item 2', valor: 'b' },
-          { rotulo: 'Item 3', valor: 'c' },
-          { rotulo: 'Item 4', valor: 'd' },
-        ],
-      },
-    });
-    render(<RC18DimensionsOverview report={report} />);
-    const card = screen.getByTestId('rc18-dimensao-acuracia');
-    // À vista: situação, percentual e a legenda curta (com as regras fora do cálculo).
-    expect(within(card).getByText('Medido')).toBeVisible();
-    expect(within(card).getByText('92,65%')).toBeVisible();
-    expect(within(card).getByText('63 de 68 regras aprovadas · 2 sem execução')).toBeVisible();
-
-    // Em "Ver detalhes", fechado por padrão: o que é medido, coleta, limite, evidências e como medir.
-    const detalhes = within(card).getByTestId('rc18-detalhes-acuracia') as HTMLDetailsElement;
-    expect(detalhes.open).toBe(false);
-    expect(within(detalhes).getByText('Ver detalhes')).toBeInTheDocument();
-    const limite = within(detalhes).getByText('Sem coleta automática para Acurácia.');
-    expect(limite).not.toBeVisible();
-    detalhes.open = true;
-    for (const rotulo of ['O que é medido', 'Coleta', 'Limite do indicador', 'Evidências', 'Dimensões de DataScan agregadas', 'Como medir no Google Cloud']) {
-      expect(within(detalhes).getByText(rotulo)).toBeVisible();
+    // 1) Listagem não lida (cenário real do backend): texto próprio, KPIs "—" em cinza e nada afirmado sobre regras
+    const primeiro = renderOverview(erroOverview);
+    expect(screen.getByText('A listagem de DataScans não pôde ser lida. Veja os diagnósticos.')).toBeVisible();
+    expect(screen.getByText(/Listagem de DataScans não lida/)).toBeVisible();
+    expect(screen.getByTestId('rc18-kpi-tabelas-afetadas')).toHaveTextContent('Escopo não lido');
+    for (const id of KPIS) {
+      expect(screen.getByTestId(`rc18-kpi-${id}`)).toHaveTextContent('—');
+      expect(corDoPonto(id)).toBe(NEUTRO);
     }
-    expect(limite).toBeVisible();
-    expect(within(detalhes).getByText('Regras aprovadas na última execução')).toBeVisible();
-    expect(within(detalhes).getByText('2 regra(s) configurada(s) sem execução — fora do cálculo.')).toBeVisible();
-    expect(within(detalhes).getByText('Regras de qualidade (DataScans) • Dataplex DataScan')).toBeVisible();
-    expect(within(detalhes).getByText('Regras: execução mais recente: 15/01/2026 08:03 UTC')).toBeVisible();
-    expect(within(detalhes).getByText('e mais 1 item(ns).')).toBeVisible();
-    expect(within(detalhes).getByText('ACURACIA')).toBeVisible();
-    expect(within(detalhes).getByText('Recurso de Acurácia:')).toBeVisible();
-    expect(within(detalhes).queryByText('Por que não há indicador')).toBeNull();
-  });
+    fireEvent.click(
+      within(screen.getByTestId('rc18-dimensao-integridade')).getByRole('button', { name: /Detalhes de Integridade/ })
+    );
+    const gaveta = screen.getByRole('dialog', { name: 'Integridade' });
+    expect(within(gaveta).getByText(/não é possível afirmar se há regras desta dimensão/)).toBeVisible();
+    expect(within(gaveta).queryByText(/Não há regras marcadas/)).toBeNull();
+    expect(within(gaveta).queryByText(/Para incluir um indicador/)).toBeNull();
+    expect(within(gaveta).queryByText(/nenhuma executada no escopo/)).toBeNull();
+    primeiro.unmount();
 
-  it('indicador sem legenda curta usa a unidade e a descrição completa', () => {
-    const report = buildReport({
-      clareza: {
-        coleta: 'parcial',
-        estado: 'medido',
-        indicadores: [{ id: 'colunas_descritas', rotulo: 'Colunas com descrição', valorPct: 60, numerador: 1200, denominador: 2000, unidade: 'colunas' }],
-      },
-    });
-    render(<RC18DimensionsOverview report={report} />);
-    expect(within(screen.getByTestId('rc18-dimensao-clareza')).getByText('1.200 de 2.000 colunas — Colunas com descrição')).toBeVisible();
-  });
+    // 2) Escopo não lido por inteiro: zero fica cinza (não verde) e o cabeçalho diz o motivo
+    const zerado = JSON.parse(JSON.stringify(demoOverview)) as Rc18OverviewResponse;
+    zerado.resumoNaoConformidades = {
+      ...zerado.resumoNaoConformidades,
+      totalRegrasReprovadas: 0,
+      tabelasComFalhas: 0,
+      scansDesatualizados: 0,
+      lacunasGovernanca: 0,
+      governancaNaoVerificada: 0,
+    };
+    const naoLidos = JSON.parse(JSON.stringify(zerado)) as Rc18OverviewResponse;
+    naoLidos.escopo = { ...naoLidos.escopo, scansNaoLidos: 1, lidoPorInteiro: false };
+    const segundo = renderOverview(naoLidos);
+    expect(screen.getByText(/1 scan\(s\) não lido\(s\)/)).toBeVisible();
+    for (const id of KPIS) expect(corDoPonto(id)).toBe(NEUTRO);
+    segundo.unmount();
 
-  it('regras configuradas e nunca executadas: sem percentual, com o atalho para as regras', () => {
-    const onShowRules = vi.fn();
-    const report = buildReport({
-      adaptabilidade: { regras: { total: 2, executadas: 0, aprovadas: 0, reprovadas: 0, naoExecutadas: 2 } },
-    });
-    render(<RC18DimensionsOverview report={report} onShowRules={onShowRules} />);
-    const card = screen.getByTestId('rc18-dimensao-adaptabilidade');
-    expect(within(card).getByText('Sem indicador')).toBeVisible();
-    expect(within(card).getByText('2 regra(s) sem execução')).toBeVisible();
-    expect(within(card).queryByText(/%/)).toBeNull();
-    fireEvent.click(within(card).getByRole('button', { name: 'Ver regras de Adaptabilidade' }));
-    expect(onShowRules).toHaveBeenCalledWith('adaptabilidade');
-  });
+    const incompleta = JSON.parse(JSON.stringify(zerado)) as Rc18OverviewResponse;
+    incompleta.escopo = { ...incompleta.escopo, scansNaoLidos: 0, truncado: false, lidoPorInteiro: false };
+    const terceiro = renderOverview(incompleta);
+    expect(screen.getByText(/listagem incompleta/)).toBeVisible();
+    for (const id of KPIS) expect(corDoPonto(id)).toBe(NEUTRO);
+    terceiro.unmount();
 
-  it('dimensão com regras oferece o atalho para a lista de regras', () => {
-    const onShowRules = vi.fn();
-    const report = buildReport({
-      integridade: {
-        estado: 'medido',
-        porRegrasPersonalizadas: true,
-        indicadores: [{ id: 'regras_dq', rotulo: 'Regras aprovadas', valorPct: 33.33, numerador: 1, denominador: 3, unidade: 'regras' }],
-        regras: { total: 3, executadas: 3, aprovadas: 1, reprovadas: 2, naoExecutadas: 0 },
-      },
-    });
-    render(<RC18DimensionsOverview report={report} onShowRules={onShowRules} />);
-    const card = screen.getByTestId('rc18-dimensao-integridade');
-    const atalho = within(card).getByRole('button', { name: 'Ver regras de Integridade' });
-    expect(atalho).toHaveTextContent('Ver regras');
-    fireEvent.click(atalho);
-    expect(onShowRules).toHaveBeenCalledWith('integridade');
-    // Dimensão medida só por regras personalizadas: a coleta informada nos detalhes é essa.
-    expect(within(card).getByText('Regras de DataScan marcadas com a dimensão personalizada')).toBeInTheDocument();
-  });
-
-  it('avisa quando não há escopo e não atesta conformidade', () => {
-    const report = buildReport();
-    report.escopo.tabelas = [];
-    render(<RC18DimensionsOverview report={report} />);
-    expect(screen.getByText(/Nenhum DataScan de qualidade de dados foi encontrado/)).toBeInTheDocument();
-    expect(screen.getByText(/não atesta conformidade regulatória/)).toBeInTheDocument();
-    expect(screen.getByText(/31\/12\/2026/)).toBeInTheDocument();
-  });
-
-  it('formatadores não presumem valores', () => {
-    expect(formatPct(null)).toBe('—');
-    expect(formatPct(undefined)).toBe('—');
-    expect(formatPct(100)).toBe('100%');
-    expect(formatCount(null)).toBe('—');
-    expect(formatCount(1234)).toBe('1.234');
-    expect(formatEvidenceValue('2026-01-15T08:03:36.000Z')).toBe('15/01/2026 08:03 UTC');
-    expect(formatEvidenceValue('3 de 4')).toBe('3 de 4');
-  });
-
-  it('resultado da regra: só o que a API devolve para cada forma de regra', () => {
-    const rule = (overrides: Partial<Rc18Rule>): Rc18Rule => ({
-      ruleName: 'regra',
-      description: null,
-      column: '—',
-      table: 't',
-      tableKey: 'd.t',
-      executed: true,
-      passed: true,
-      resultKind: 'linhas',
-      evaluatedCount: null,
-      passedCount: null,
-      failedCount: null,
-      passPercentage: null,
-      assertionRowCount: null,
-      dimension: 'VALIDITY',
-      dimensionId: 'acuracia',
-      dimensionName: 'Acurácia',
-      inciso: 'II',
-      ...overrides,
-    });
-    expect(ruleResultText(rule({ evaluatedCount: 600, passedCount: 599, passPercentage: 99.83, passed: false }))).toBe('599 de 600 linhas (99,83%)');
-    expect(ruleResultText(rule({ resultKind: 'assercao', assertionRowCount: 0 }))).toBe('Nenhuma linha em desacordo');
-    expect(ruleResultText(rule({ resultKind: 'assercao', assertionRowCount: 1, passed: false }))).toBe('1 linha em desacordo');
-    expect(ruleResultText(rule({ resultKind: 'assercao', assertionRowCount: 12, passed: false }))).toBe('12 linhas em desacordo');
-    expect(ruleResultText(rule({ resultKind: 'agregada' }))).toBe('Condição atendida');
-    expect(ruleResultText(rule({ resultKind: 'agregada', passed: false }))).toBe('Condição não atendida');
-    // Sem execução, sem contagem ou forma desconhecida: nada é presumido.
-    expect(ruleResultText(rule({ executed: false, passed: null }))).toBe('—');
-    expect(ruleResultText(rule({ resultKind: 'assercao', assertionRowCount: null, passed: false }))).toBe('—');
-    expect(ruleResultText(rule({ resultKind: null }))).toBe('—');
+    // 3) Tudo lido e zero de fato: verde; cobertura de 100% só entre as tabelas lidas: "Leitura parcial"
+    const lido = JSON.parse(JSON.stringify(zerado)) as Rc18OverviewResponse;
+    const acessibilidade = lido.dimensoes.find((d) => d.id === 'acessibilidade')!;
+    acessibilidade.situacao = 'leitura_parcial';
+    acessibilidade.indicadores = [
+      { ...acessibilidade.indicadores[0], numerador: 1, denominador: 1, valorPct: 100, naoVerificadas: 2 },
+    ];
+    renderOverview(lido);
+    for (const id of KPIS) expect(corDoPonto(id)).toBe(VERDE);
+    const cartao = screen.getByTestId('rc18-dimensao-acessibilidade');
+    expect(within(cartao).getByText('Leitura parcial')).toBeVisible();
+    expect(cartao).toHaveTextContent('2 tabela(s) não verificada(s)');
   });
 });

@@ -1,27 +1,35 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 'use strict';
 
 /**
  * Catálogo das 12 dimensões de qualidade da informação da
  * Resolução Conjunta nº 18, de 28 de novembro de 2025 (art. 2º, § 2º, incisos I a XII).
  *
- * - `definicao` é transcrição literal do normativo. Não parafrasear. Ela e
+ * - `definicao` é transcrição literal do normativo. Não parafrasear. Ela, `inciso` e
  *   `NORMA.dispositivoDimensoes` ficam na resposta da API e no arquivo de evidências; a tela do
  *   painel não as exibe.
- * - Os textos exibidos na tela (`NORMA.aviso`, `comoEMedido`, `lacuna`, `fontes`, `medicao`) não
- *   citam artigos, parágrafos ou incisos: a referência ao normativo é o link do aviso da tela
- *   (`NORMA.url`).
+ * - `categoria` separa controles sobre os dados ('dados') de prontidão/documentação no catálogo
+ *   ('governanca') para evitar equiparar ausência de metadado a violação de qualidade de dados.
  * - `coleta` descreve o que ESTA versão do painel consegue observar por API:
  *     'automatica'   -> indicador calculado a partir de regras de qualidade (Dataplex DataScans);
  *     'parcial'      -> indicador técnico que cobre apenas parte da definição (metadados do
  *                       BigQuery, Data Lineage API ou aspectos do Knowledge Catalog);
  *     'declaratoria' -> sem coletor próprio: o indicador vem das regras de DataScan que a
  *                       instituição marcar com a dimensão personalizada correspondente.
- * - `medicao` lista os recursos do Google Cloud com que a instituição produz a evidência lida
- *   pelo painel (exemplos prontos na pasta `rc18-kit/` do repositório).
  * - `dqDimensions` são os nomes de dimensão do Dataplex DataScan agregados em cada dimensão.
- *   O mapeamento das dimensões padrão (VALIDITY, UNIQUENESS, VOLUME, FRESHNESS) e a escolha dos
- *   indicadores parciais (contatos -> acessibilidade, uso -> relevância etc.) são escolhas deste
- *   projeto, não do normativo: a instituição deve validá-las com a sua área de conformidade.
  */
 
 const NORMA = Object.freeze({
@@ -42,6 +50,7 @@ const DIMENSIONS = Object.freeze([
     id: 'acessibilidade',
     inciso: 'I',
     nome: 'Acessibilidade',
+    categoria: 'governanca',
     definicao:
       'condições que permitam aos usuários obter informações, incluindo a indicação clara do local de disponibilização, a forma de realizar eventual demanda, os prazos e outras características relevantes de acesso, assegurado tratamento especial às pessoas com deficiência',
     coleta: 'parcial',
@@ -60,6 +69,7 @@ const DIMENSIONS = Object.freeze([
     id: 'acuracia',
     inciso: 'II',
     nome: 'Acurácia',
+    categoria: 'dados',
     definicao:
       'medida em que a informação fornecida reflete a realidade de maneira precisa e confiável, de acordo com a metodologia utilizada',
     coleta: 'automatica',
@@ -77,6 +87,7 @@ const DIMENSIONS = Object.freeze([
     id: 'adaptabilidade',
     inciso: 'III',
     nome: 'Adaptabilidade',
+    categoria: 'dados',
     definicao:
       'capacidade de gerar informações em formato que atenda às diversas demandas por informações, incluindo as não periodicamente reportadas, bem como as decorrentes de mudanças regulamentares previstas, inclusive em situações adversas ou de crise',
     coleta: 'declaratoria',
@@ -94,6 +105,7 @@ const DIMENSIONS = Object.freeze([
     id: 'clareza',
     inciso: 'IV',
     nome: 'Clareza',
+    categoria: 'governanca',
     definicao:
       'apresentação das informações de forma concisa, permitindo a fácil compreensão e atendendo às necessidades do usuário',
     coleta: 'parcial',
@@ -111,6 +123,7 @@ const DIMENSIONS = Object.freeze([
     id: 'comparabilidade',
     inciso: 'V',
     nome: 'Comparabilidade',
+    categoria: 'dados',
     definicao:
       'capacidade de possibilitar ao usuário identificar e compreender semelhanças e diferenças entre informações, seja em diferentes períodos ou entre diferentes áreas geográficas ou domínios não geográficos',
     coleta: 'parcial',
@@ -129,6 +142,7 @@ const DIMENSIONS = Object.freeze([
     id: 'completude',
     inciso: 'VI',
     nome: 'Completude',
+    categoria: 'dados',
     definicao: 'capacidade de a informação atender integralmente os aspectos requeridos, com dados completos',
     coleta: 'automatica',
     dqDimensions: ['COMPLETENESS', 'VOLUME', 'COMPLETUDE'],
@@ -145,6 +159,7 @@ const DIMENSIONS = Object.freeze([
     id: 'confiabilidade',
     inciso: 'VII',
     nome: 'Confiabilidade',
+    categoria: 'dados',
     definicao: 'ausência de desvio relevante nos dados revisados em relação ao seu valor inicial',
     coleta: 'declaratoria',
     dqDimensions: ['CONFIABILIDADE'],
@@ -161,6 +176,7 @@ const DIMENSIONS = Object.freeze([
     id: 'consistencia',
     inciso: 'VIII',
     nome: 'Consistência',
+    categoria: 'dados',
     definicao:
       'medida em que as informações referentes ao mesmo evento ou fato estão padronizadas e livres de contradições, mesmo quando geradas por diferentes fontes ou métodos',
     coleta: 'automatica',
@@ -178,6 +194,7 @@ const DIMENSIONS = Object.freeze([
     id: 'integridade',
     inciso: 'IX',
     nome: 'Integridade',
+    categoria: 'dados',
     definicao:
       'propriedade pela qual se assegura que a informação é autêntica e que não foi modificada de maneira não autorizada ou acidental',
     coleta: 'declaratoria',
@@ -195,6 +212,7 @@ const DIMENSIONS = Object.freeze([
     id: 'rastreabilidade',
     inciso: 'X',
     nome: 'Rastreabilidade',
+    categoria: 'governanca',
     definicao:
       'condições que permitam rastrear a informação desde a origem até a sua disponibilização ao usuário final',
     coleta: 'parcial',
@@ -211,6 +229,7 @@ const DIMENSIONS = Object.freeze([
     id: 'relevancia',
     inciso: 'XI',
     nome: 'Relevância',
+    categoria: 'governanca',
     definicao:
       'capacidade de fornecer informações úteis, que possam influenciar a tomada de decisões pelos usuários',
     coleta: 'parcial',
@@ -228,6 +247,7 @@ const DIMENSIONS = Object.freeze([
     id: 'tempestividade',
     inciso: 'XII',
     nome: 'Tempestividade',
+    categoria: 'dados',
     definicao:
       'fornecimento das informações em tempo hábil, no prazo estabelecido, observado um curto intervalo de tempo entre os fatos relatados e a data da prestação da informação, de modo a não comprometer sua utilidade aos usuários',
     coleta: 'parcial',

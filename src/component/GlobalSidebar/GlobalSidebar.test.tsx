@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import GlobalSidebar from './GlobalSidebar';
+import SidebarMenuItem from './SidebarMenuItem';
 
 const mockNavigate = vi.fn();
 const mockDispatch = vi.fn();
@@ -510,6 +511,22 @@ describe('GlobalSidebar', () => {
       mockLocation = { pathname: '/data-products/' };
       render(<GlobalSidebar />);
       expect(screen.getByTestId('sidebar-menu-item-data-products')).toHaveAttribute('data-active', 'true');
+    });
+
+    it('renders Qualidade RC 18 menu item with multiLine, marks it active on /rc18-dashboard and navigates on click', () => {
+      mockLocation = { pathname: '/rc18-dashboard' };
+      render(<GlobalSidebar />);
+      const rc18Item = screen.getByTestId('sidebar-menu-item-qualidade-rc-18');
+      expect(rc18Item).toBeInTheDocument();
+      expect(rc18Item).toHaveAttribute('data-active', 'true');
+      const rc18Props = vi
+        .mocked(SidebarMenuItem)
+        .mock.calls.map(([props]) => props)
+        .find((props) => props.label === 'Qualidade RC 18');
+      expect(rc18Props?.multiLine).toBe(true);
+
+      fireEvent.click(rc18Item);
+      expect(mockNavigate).toHaveBeenCalledWith('/rc18-dashboard');
     });
   });
 });

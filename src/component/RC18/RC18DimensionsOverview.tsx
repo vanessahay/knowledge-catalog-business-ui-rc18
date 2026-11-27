@@ -1,298 +1,505 @@
-import React from 'react';
-import { Alert, Box, Button, Card, CardContent, Chip, Link, Typography } from '@mui/material';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+import React, { useState } from 'react';
+import { Alert, Box, Button, ButtonBase, Typography } from '@mui/material';
+import RC18DimensionDrawer from './RC18DimensionDrawer';
 import {
-  type Rc18Coleta,
+  SITUACAO_STYLE,
   type Rc18Dimension,
-  type Rc18DimensionsReport,
-  type Rc18Estado,
   type Rc18Indicator,
+  type Rc18OverviewResponse,
+  escopoVazioTexto,
   formatCount,
-  formatEvidenceValue,
-  formatIsoDate,
-  formatPct,
+  formatIndicatorPct,
+  scansSemLeitura,
 } from './rc18Types';
 
 /**
- * Visão geral das 12 dimensões de qualidade da informação da Resolução Conjunta nº 18/2025.
- *
- * À vista ficam só o nome, a situação e o indicador de cada dimensão — nunca um percentual
- * presumido. O que é medido, a coleta, o limite do indicador, as evidências e como medir no
- * Google Cloud ficam em "Ver detalhes": um elemento <details> nativo, fechado por padrão, cujo
- * conteúdo continua na página (acessível por teclado e pela busca do navegador).
- *
- * A tela não reproduz o texto da Resolução nem cita artigos; o link do aviso leva ao normativo.
+ * Visão geral das 12 dimensões RC 18 no padrão visual do Knowledge Catalog Business UI:
+ *  - Faixa superior de não conformidades em aberto (4 KPIs clicáveis);
+ *  - Separação clara entre "Qualidade dos dados" (8 dimensões) e "Governança no catálogo" (4);
+ *  - Cartões enxutos sem referências a artigos/incisos e sem parágrafos (detalhes na gaveta lateral).
  */
 
-const ESTADO_STYLE: Record<Rc18Estado, { label: string; bg: string; fg: string }> = {
-  // Azul (e não verde): "medido" significa que há indicador, não que o resultado é bom.
-  medido: { label: 'Medido', bg: '#E8F0FE', fg: '#174EA6' },
-  sem_dados: { label: 'Sem dados no escopo', bg: '#FEF7E0', fg: '#B06000' },
-  nao_medido: { label: 'Não medido automaticamente', bg: '#F1F3F4', fg: '#5F6368' },
-};
+interface Props {
+  overview: Rc18OverviewResponse;
+  onShowDimensionRules: (dimensionId: string, onlyFailed: boolean) => void;
+  onJumpToFailedRules: () => void;
+  onJumpToFailedTables: () => void;
+  onJumpToStaleTables: () => void;
+  onJumpToGovernanceGaps: () => void;
+}
 
-const COLETA_LABEL: Record<Rc18Coleta, string> = {
-  automatica: 'Regras de qualidade (DataScans)',
-  parcial: 'Indicador técnico parcial',
-  declaratoria: 'Regras de DataScan marcadas com a dimensão personalizada (nenhuma executada no escopo)',
-};
-const COLETA_REGRAS_PERSONALIZADAS = 'Regras de DataScan marcadas com a dimensão personalizada';
-
-const MAX_EVIDENCES = 3;
-
-/** Legenda curta do indicador, por exemplo "64 de 69 regras aprovadas". */
 const indicatorCaption = (ind: Rc18Indicator): string =>
-  `${formatCount(ind.numerador)} de ${formatCount(ind.denominador)} ${ind.rotuloCurto ?? `${ind.unidade} — ${ind.rotulo}`}`;
+  `${formatCount(ind.numerador)} de ${formatCount(ind.denominador)} ${ind.rotuloCurto ?? ind.unidade}${
+    ind.naoVerificadas ? ` · ${ind.naoVerificadas} tabela(s) não verificada(s)` : ''
+  }`;
 
-const captionRowSx = { display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', columnGap: '8px' } as const;
+// Cores dos KPIs: vermelho/laranja para falhas e lacunas, verde para zero verificado e cinza quando
+// o valor não pôde ser lido ou verificado (o KPI mostra "—").
+const TOM_VERMELHO = { accentColor: '#C5221F', dotShadow: '0px 0px 0px 2px #FCE8E6' };
+const TOM_LARANJA = { accentColor: '#E37400', dotShadow: '0px 0px 0px 2px #FEF7E0' };
+const TOM_VERDE = { accentColor: '#128937', dotShadow: '0px 0px 0px 2px #E6F4EA' };
+const TOM_NEUTRO = { accentColor: '#575757', dotShadow: '0px 0px 0px 2px #F1F3F4' };
 
-const textButtonSx = {
-  textTransform: 'none',
-  fontWeight: 600,
-  fontSize: '12px',
-  lineHeight: 1.66,
-  padding: 0,
-  minWidth: 0,
-} as const;
-
-const detailsSx = {
-  mt: 1.5,
-  '& > summary': {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: '2px',
-    cursor: 'pointer',
-    listStyle: 'none',
-    color: '#1A73E8',
-    fontSize: '13px',
-    fontWeight: 600,
-    borderRadius: '4px',
-    userSelect: 'none',
-    '&::-webkit-details-marker': { display: 'none' },
-    '&:hover': { textDecoration: 'underline' },
-    '&:focus-visible': { outline: '2px solid #1A73E8', outlineOffset: '2px' },
-  },
-  '& > summary .rc18-seta': {
-    fontSize: '18px',
-    transition: 'transform 150ms ease',
-    '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
-  },
-  '&[open] > summary .rc18-seta': { transform: 'rotate(180deg)' },
-  // O rótulo acompanha o estado aberto/fechado sem JavaScript.
-  '&[open] > summary .rc18-ao-fechado, &:not([open]) > summary .rc18-ao-aberto': { display: 'none' },
-} as const;
-
-const DetailItem: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <Box>
-    <Typography variant="caption" component="div" sx={{ color: '#3C4043', fontWeight: 700 }}>
+const KpiTile: React.FC<{
+  label: string;
+  /** `null` quando o valor não pôde ser lido: exibido como "—". */
+  value: number | null;
+  sublabel: string;
+  accentColor: string;
+  dotShadow: string;
+  testId: string;
+  onClick: () => void;
+}> = ({ label, value, sublabel, accentColor, dotShadow, testId, onClick }) => (
+  <ButtonBase
+    data-testid={testId}
+    onClick={onClick}
+    sx={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'flex-start',
+      justifyContent: 'center',
+      textAlign: 'left',
+      padding: '12px 16px',
+      borderRadius: '10px',
+      border: '1px solid #E9EEF6',
+      backgroundColor: '#FFFFFF',
+      minWidth: 0,
+      width: '100%',
+      transition: 'border-color 150ms ease, background-color 150ms ease',
+      '&:hover': { borderColor: '#0B57D0', backgroundColor: '#F8FAFD' },
+      '&:focus-visible': { outline: '2px solid #0B57D0', outlineOffset: '2px' },
+    }}
+  >
+    <Typography
+      sx={{
+        fontFamily: '"Google Sans", sans-serif',
+        fontSize: '12px',
+        fontWeight: 500,
+        color: '#575757',
+        lineHeight: '18px',
+      }}
+    >
       {label}
     </Typography>
-    <Typography variant="caption" component="div" sx={{ color: '#5F6368', overflowWrap: 'anywhere' }}>
-      {children}
+    <Box sx={{ display: 'flex', alignItems: 'center', gap: '8px', mt: '4px' }}>
+      <Box
+        data-testid={`${testId}-ponto`}
+        sx={{
+          width: '8px',
+          height: '8px',
+          borderRadius: '4px',
+          backgroundColor: accentColor,
+          boxShadow: dotShadow,
+          flexShrink: 0,
+        }}
+      />
+      <Typography
+        sx={{
+          fontFamily: '"Google Sans", sans-serif',
+          fontSize: '20px',
+          fontWeight: 500,
+          color: value !== null && value > 0 ? accentColor : '#1F1F1F',
+          lineHeight: '26px',
+        }}
+      >
+        {formatCount(value)}
+      </Typography>
+    </Box>
+    <Typography sx={{ fontSize: '12px', color: '#575757', mt: '2px', lineHeight: 1.3 }}>
+      {sublabel}
     </Typography>
-  </Box>
+  </ButtonBase>
 );
 
-const DimensionCard: React.FC<{ dimension: Rc18Dimension; onShowRules?: (dimensionId: string) => void }> = ({
-  dimension: d,
-  onShowRules,
-}) => {
-  const estado = ESTADO_STYLE[d.estado];
-  const medicao = d.medicao ?? [];
-  const semIndicador = d.indicadores.length === 0;
-  const temIndicadorDeRegras = d.indicadores.some((ind) => ind.id === 'regras_dq');
-  const rulesButton =
-    d.regras.total > 0 && onShowRules ? (
-      <Button size="small" onClick={() => onShowRules(d.id)} aria-label={`Ver regras de ${d.nome}`} sx={textButtonSx}>
-        Ver regras
-      </Button>
-    ) : null;
+const DimensionCard: React.FC<{
+  dimension: Rc18Dimension;
+  onShowRules: (dimensionId: string, onlyFailed: boolean) => void;
+  onOpenDetails: (dimension: Rc18Dimension) => void;
+}> = ({ dimension: d, onShowRules, onOpenDetails }) => {
+  const tone = SITUACAO_STYLE[d.situacao];
+  const primary = d.indicadores[0] || null;
+  const secondary = d.indicadores.length > 1 ? d.indicadores[1] : null;
+  const hasFailedRules = d.regras.reprovadas > 0;
+  const hasAnyRules = d.regras.total + d.regras.suspensas > 0;
+
+  const badgeText = hasFailedRules
+    ? `${d.regras.reprovadas} ${d.regras.reprovadas === 1 ? 'falha' : 'falhas'}`
+    : tone.label;
 
   return (
-    <Card
+    <Box
       data-testid={`rc18-dimensao-${d.id}`}
-      sx={{ borderRadius: '16px', border: '1px solid #E0E0E0', boxShadow: 'none' }}
+      sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'space-between',
+        backgroundColor: '#FFFFFF',
+        border: hasFailedRules ? '1px solid #F6AEA9' : '1px solid #E8EEF5',
+        borderRadius: '12px',
+        padding: '16px 18px',
+        gap: '12px',
+        minWidth: 0,
+        boxSizing: 'border-box',
+      }}
     >
-      <CardContent sx={{ padding: '20px', '&:last-child': { paddingBottom: '20px' } }}>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', mb: 0.5 }}>
-          <Typography variant="caption" sx={{ color: '#5F6368', fontWeight: 700 }}>
-            Inciso {d.inciso}
+      <Box>
+        {/* Nome e situação factual */}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+          <Typography
+            component="h3"
+            sx={{
+              fontFamily: '"Google Sans", sans-serif',
+              fontSize: '15px',
+              fontWeight: 500,
+              color: '#1F1F1F',
+              lineHeight: 1.3,
+            }}
+          >
+            {d.nome}
           </Typography>
-          <Chip
-            label={estado.label}
-            size="small"
-            sx={{ backgroundColor: estado.bg, color: estado.fg, fontWeight: 700 }}
-          />
+          <Box
+            sx={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              px: '8px',
+              py: '2px',
+              borderRadius: '12px',
+              backgroundColor: tone.bg,
+              flexShrink: 0,
+            }}
+          >
+            <Box
+              sx={{
+                width: '7px',
+                height: '7px',
+                borderRadius: '50%',
+                backgroundColor: tone.color,
+              }}
+            />
+            <Typography sx={{ fontSize: '11.5px', fontWeight: 500, color: tone.color, whiteSpace: 'nowrap' }}>
+              {badgeText}
+            </Typography>
+          </Box>
         </Box>
 
-        <Typography variant="h6" component="h3" sx={{ fontWeight: 700, color: '#1F1F1F' }}>
-          {d.nome}
-        </Typography>
-
-        {d.indicadores.map((ind) => (
-          <Box key={ind.id} sx={{ mt: 1.5 }}>
-            <Typography variant="h4" sx={{ fontWeight: 800, color: '#1F1F1F', lineHeight: 1.1 }}>
-              {formatPct(ind.valorPct)}
+        {/* Indicador principal */}
+        {primary ? (
+          <Box sx={{ mt: '12px' }}>
+            <Typography
+              sx={{
+                fontFamily: '"Google Sans", sans-serif',
+                fontSize: '26px',
+                fontWeight: 500,
+                color: hasFailedRules ? '#C5221F' : '#1F1F1F',
+                lineHeight: 1.15,
+              }}
+            >
+              {formatIndicatorPct(primary)}
             </Typography>
-            <Box sx={captionRowSx}>
-              <Typography variant="caption" sx={{ color: '#5F6368' }}>
-                {indicatorCaption(ind)}
-                {ind.id === 'regras_dq' && d.regras.naoExecutadas > 0 ? ` · ${d.regras.naoExecutadas} sem execução` : ''}
+            <Typography sx={{ fontSize: '12px', color: '#575757', mt: '4px', lineHeight: 1.4 }}>
+              {indicatorCaption(primary)}
+              {primary.id === 'regras_dq' && d.regras.naoExecutadas > 0
+                ? ` · ${d.regras.naoExecutadas} sem execução`
+                : ''}
+              {primary.id === 'regras_dq' && d.regras.suspensas > 0
+                ? ` · ${d.regras.suspensas} suspensa(s)`
+                : ''}
+            </Typography>
+            {secondary && (
+              <Typography sx={{ fontSize: '11.5px', color: '#575757', mt: '4px', lineHeight: 1.35 }}>
+                {secondary.id === 'tabelas_com_termo_de_glossario' ? 'Glossário: ' : ''}
+                {formatIndicatorPct(secondary)} ({indicatorCaption(secondary)})
               </Typography>
-              {ind.id === 'regras_dq' && rulesButton}
-            </Box>
+            )}
           </Box>
-        ))}
-
-        {semIndicador && (
-          <Box sx={{ mt: 1.5 }}>
-            <Typography variant="h4" aria-hidden="true" sx={{ fontWeight: 800, color: '#BDC1C6', lineHeight: 1.1 }}>
+        ) : (
+          <Box sx={{ mt: '12px' }}>
+            <Typography
+              aria-hidden="true"
+              sx={{
+                fontFamily: '"Google Sans", sans-serif',
+                fontSize: '26px',
+                fontWeight: 500,
+                color: '#BDC1C6',
+                lineHeight: 1.15,
+              }}
+            >
               —
             </Typography>
-            <Typography variant="caption" sx={{ color: '#5F6368' }}>
-              Sem indicador
+            <Typography sx={{ fontSize: '12px', color: '#575757', mt: '4px' }}>
+              {d.regras.naoExecutadas > 0
+                ? `${d.regras.naoExecutadas} regra(s) sem execução`
+                : d.regras.suspensas > 0
+                ? `${d.regras.suspensas} regra(s) suspensa(s)`
+                : 'Sem indicador no escopo'}
             </Typography>
           </Box>
         )}
+      </Box>
 
-        {/* Regras configuradas e ainda não executadas, quando não há indicador de regras. */}
-        {!temIndicadorDeRegras && d.regras.total > 0 && (
-          <Box sx={{ ...captionRowSx, mt: 0.5 }}>
-            <Typography variant="caption" sx={{ color: '#B06000' }}>
-              {d.regras.naoExecutadas} regra(s) sem execução
-            </Typography>
-            {rulesButton}
-          </Box>
+      {/* Ações discretas */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', pt: '4px' }}>
+        {hasAnyRules ? (
+          <Button
+            size="small"
+            onClick={() => onShowRules(d.id, hasFailedRules)}
+            aria-label={hasFailedRules ? `Ver falhas de ${d.nome}` : `Ver regras de ${d.nome}`}
+            sx={{
+              textTransform: 'none',
+              fontFamily: '"Google Sans", sans-serif',
+              fontWeight: 500,
+              fontSize: '12.5px',
+              color: hasFailedRules ? '#C5221F' : '#0B57D0',
+              p: 0,
+              minWidth: 0,
+              '&:hover': { backgroundColor: 'transparent', textDecoration: 'underline' },
+            }}
+          >
+            {hasFailedRules ? 'Ver falhas' : 'Ver regras'}
+          </Button>
+        ) : (
+          <span />
         )}
-
-        <Box component="details" data-testid={`rc18-detalhes-${d.id}`} sx={detailsSx}>
-          <summary>
-            <span className="rc18-ao-fechado">Ver detalhes</span>
-            <span className="rc18-ao-aberto">Ocultar detalhes</span>
-            <ExpandMoreIcon className="rc18-seta" aria-hidden="true" />
-          </summary>
-
-          <Box sx={{ display: 'grid', gap: '10px', mt: 1.5, pt: 1.5, borderTop: '1px solid #F1F3F4' }}>
-            {semIndicador ? (
-              <DetailItem label="Por que não há indicador">
-                {d.estado === 'sem_dados' ? `Sem indicador no escopo consultado. ${d.comoEMedido ?? ''}`.trim() : d.lacuna}
-                {d.estado === 'nao_medido' && d.dqDimensions.length > 0 && (
-                  <>
-                    {' '}
-                    Para incluir um indicador: marque regras de DataScan com a dimensão personalizada{' '}
-                    <strong>{d.dqDimensions[d.dqDimensions.length - 1]}</strong>.
-                  </>
-                )}
-              </DetailItem>
-            ) : (
-              <DetailItem label="O que é medido">
-                {d.indicadores.map((ind) => (
-                  <Box key={ind.id}>{ind.rotulo}</Box>
-                ))}
-                {d.regras.naoExecutadas > 0 && (
-                  <Box sx={{ color: '#B06000' }}>
-                    {d.regras.naoExecutadas} regra(s) configurada(s) sem execução — fora do cálculo.
-                  </Box>
-                )}
-              </DetailItem>
-            )}
-
-            <DetailItem label="Coleta">
-              {d.porRegrasPersonalizadas ? COLETA_REGRAS_PERSONALIZADAS : COLETA_LABEL[d.coleta]}
-              {d.fontes.length > 0 ? ` • ${d.fontes.join('; ')}` : ''}
-            </DetailItem>
-
-            {!semIndicador && <DetailItem label="Limite do indicador">{d.lacuna}</DetailItem>}
-
-            {d.evidencias.length > 0 && (
-              <DetailItem label="Evidências">
-                {d.evidencias.slice(0, MAX_EVIDENCES).map((ev, idx) => (
-                  <Box key={idx}>
-                    {ev.rotulo}: {formatEvidenceValue(ev.valor)}
-                  </Box>
-                ))}
-                {d.evidencias.length > MAX_EVIDENCES && <Box>e mais {d.evidencias.length - MAX_EVIDENCES} item(ns).</Box>}
-              </DetailItem>
-            )}
-
-            <DetailItem label="Dimensões de DataScan agregadas">{d.dqDimensions.join(', ')}</DetailItem>
-
-            {medicao.length > 0 && (
-              <DetailItem label="Como medir no Google Cloud">
-                <Box component="ul" data-testid={`rc18-medicao-${d.id}`} sx={{ margin: '2px 0 4px', paddingLeft: '18px' }}>
-                  {medicao.map((m) => (
-                    <li key={m.recurso}>
-                      <strong>{m.recurso}:</strong> {m.acao}
-                    </li>
-                  ))}
-                </Box>
-                Regras e comandos de exemplo: pasta rc18-kit do repositório.
-              </DetailItem>
-            )}
-          </Box>
-        </Box>
-      </CardContent>
-    </Card>
+        <Button
+          size="small"
+          onClick={() => onOpenDetails(d)}
+          aria-label={`Detalhes de ${d.nome}`}
+          sx={{
+            textTransform: 'none',
+            fontFamily: '"Google Sans", sans-serif',
+            fontWeight: 500,
+            fontSize: '12.5px',
+            color: '#0B57D0',
+            p: 0,
+            minWidth: 0,
+            '&:hover': { backgroundColor: 'transparent', textDecoration: 'underline' },
+          }}
+        >
+          Detalhes
+        </Button>
+      </Box>
+    </Box>
   );
 };
 
-const RC18DimensionsOverview: React.FC<{
-  report: Rc18DimensionsReport;
-  /** Abre a lista de regras de uma dimensão (visão "Qualidade por tabela"). */
-  onShowRules?: (dimensionId: string) => void;
-}> = ({ report, onShowRules }) => {
-  const { norma, escopo, resumo } = report;
+const gridSx = {
+  display: 'grid',
+  gap: '14px',
+  gridTemplateColumns: 'repeat(auto-fill, minmax(min(265px, 100%), 1fr))',
+} as const;
+
+const RC18DimensionsOverview: React.FC<Props> = ({
+  overview,
+  onShowDimensionRules,
+  onJumpToFailedRules,
+  onJumpToFailedTables,
+  onJumpToStaleTables,
+  onJumpToGovernanceGaps,
+}) => {
+  const [selectedDimension, setSelectedDimension] = useState<Rc18Dimension | null>(null);
+  const { escopo, resumoNaoConformidades: nc, dimensoes, regrasSemMapeamento } = overview;
+  // Listagem não lida, ou DataScans encontrados sem nenhum lido: os KPIs não podem afirmar zero ("—" em cinza).
+  const semLeitura = scansSemLeitura(escopo);
+  // Escopo não lido por inteiro (scans não lidos, listagem incompleta ou corte): zero não é "verificado".
+  const leituraParcial = !semLeitura && !escopo.lidoPorInteiro;
+  const escopoLido = escopo.lidoPorInteiro;
+  const govNaoVerificada = nc.governancaNaoVerificada;
+  const govSemVerificacao =
+    semLeitura ||
+    (escopo.tabelas.length > 0 && nc.lacunasGovernanca === 0 && govNaoVerificada >= escopo.tabelas.length);
+
+  const dataDimensions = dimensoes.filter((d) => d.categoria === 'dados');
+  const governanceDimensions = dimensoes.filter((d) => d.categoria === 'governanca');
+
   return (
-    <Box>
-      <Alert severity="info" sx={{ marginBottom: '16px', borderRadius: '8px' }}>
-        <strong>{norma.nome}.</strong> {norma.aviso} Prazo de adequação: {formatIsoDate(norma.prazoAdequacao)}.{' '}
-        <Link href={norma.url} target="_blank" rel="noopener noreferrer">
-          Texto do normativo
-        </Link>
-      </Alert>
-
-      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
-        <Chip label={`${resumo.medidas} com indicador`} size="small" sx={{ backgroundColor: '#E8F0FE', color: '#174EA6', fontWeight: 700 }} />
-        <Chip label={`${resumo.semDados} sem dados no escopo`} size="small" sx={{ backgroundColor: '#FEF7E0', color: '#B06000', fontWeight: 700 }} />
-        <Chip label={`${resumo.naoMedidas} não medida(s) automaticamente`} size="small" sx={{ backgroundColor: '#F1F3F4', color: '#5F6368', fontWeight: 700 }} />
-      </Box>
-
-      <Typography variant="body2" sx={{ color: '#5F6368', fontSize: '13px', marginBottom: '16px' }}>
-        Escopo: {escopo.tabelas.length} tabela(s) — {escopo.criterio}. DataScans de qualidade lidos:{' '}
-        {escopo.scansLidos} de {escopo.scansDeQualidade}
-        {escopo.truncado ? ' (lista truncada pelo limite do painel)' : ''}.
-      </Typography>
-
-      {escopo.tabelas.length === 0 && (
-        <Alert severity="warning" sx={{ marginBottom: '16px', borderRadius: '8px' }}>
-          Nenhum DataScan de qualidade de dados foi encontrado neste projeto e localização. Sem escopo, nenhuma
-          dimensão pode ser medida.
-        </Alert>
-      )}
-
-      {report.regrasSemMapeamento.length > 0 && (
-        <Alert severity="info" sx={{ marginBottom: '16px', borderRadius: '8px' }}>
-          Regras com dimensão de DataScan sem correspondência (fora dos indicadores):{' '}
-          {report.regrasSemMapeamento.map((r) => `${r.dqDimension} (${r.quantidade})`).join(', ')}.
-        </Alert>
-      )}
-
+    <Box sx={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {/* Faixa de não conformidades em aberto (4 KPIs clicáveis) */}
       <Box
-        data-testid="rc18-dimensoes-grade"
+        data-testid="rc18-resumo-nao-conformidades"
         sx={{
-          display: 'grid',
-          gap: '16px',
-          // Cabem tantos cartões por linha quanto a largura permitir (quatro em telas largas).
-          gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px, 100%), 1fr))',
-          // Os cartões de uma linha têm a mesma altura; com algum "Ver detalhes" aberto, cada um
-          // fica com a própria altura, para o cartão aberto não esticar os vizinhos.
-          '&:has(details[open])': { alignItems: 'start' },
+          backgroundColor: '#FFFFFF',
+          border: '1px solid #E8EEF5',
+          borderRadius: '12px',
+          padding: '16px 20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px',
         }}
       >
-        {report.dimensoes.map((d) => (
-          <DimensionCard key={d.id} dimension={d} onShowRules={onShowRules} />
-        ))}
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
+          <Typography
+            sx={{
+              fontFamily: '"Google Sans", sans-serif',
+              fontSize: '15px',
+              fontWeight: 500,
+              color: '#1F1F1F',
+            }}
+          >
+            Não conformidades em aberto
+          </Typography>
+          <Typography sx={{ fontSize: '12px', color: '#575757' }}>
+            {escopo.listagemLida
+              ? `${escopo.tabelas.length} tabela(s) no escopo · ${escopo.scansAtivos} scan(s) ativo(s)`
+              : 'Listagem de DataScans não lida'}
+            {escopo.scansNaoLidos > 0 ? ` · ${escopo.scansNaoLidos} scan(s) não lido(s)` : ''}
+            {escopo.scansDuplicadosIgnorados.length > 0
+              ? ` · ${escopo.scansDuplicadosIgnorados.length} duplicado(s) ignorado(s)`
+              : ''}
+            {escopo.truncado ? ' · lista truncada' : ''}
+            {leituraParcial && escopo.scansNaoLidos === 0 && !escopo.truncado ? ' · listagem incompleta' : ''}
+          </Typography>
+        </Box>
+
+        <Box
+          sx={{
+            display: 'grid',
+            gap: '12px',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(190px, 100%), 1fr))',
+          }}
+        >
+          <KpiTile
+            testId="rc18-kpi-regras-reprovadas"
+            label="Regras reprovadas"
+            value={semLeitura ? null : nc.totalRegrasReprovadas}
+            sublabel={
+              nc.regrasSemExecucao > 0
+                ? `${nc.regrasSemExecucao} sem execução`
+                : nc.regrasSuspensas > 0
+                ? `${nc.regrasSuspensas} suspensa(s)`
+                : 'Ver fila de falhas'
+            }
+            {...(semLeitura ? TOM_NEUTRO : nc.totalRegrasReprovadas > 0 ? TOM_VERMELHO : leituraParcial ? TOM_NEUTRO : TOM_VERDE)}
+            onClick={onJumpToFailedRules}
+          />
+          <KpiTile
+            testId="rc18-kpi-tabelas-afetadas"
+            label="Tabelas afetadas"
+            value={semLeitura ? null : nc.tabelasComFalhas}
+            sublabel={semLeitura ? 'Escopo não lido' : `de ${escopo.tabelas.length} tabela(s) no escopo`}
+            {...(semLeitura ? TOM_NEUTRO : nc.tabelasComFalhas > 0 ? TOM_VERMELHO : leituraParcial ? TOM_NEUTRO : TOM_VERDE)}
+            onClick={onJumpToFailedTables}
+          />
+          <KpiTile
+            testId="rc18-kpi-scans-desatualizados"
+            label="Scans desatualizados (>30d)"
+            value={semLeitura ? null : nc.scansDesatualizados}
+            sublabel="Última execução há mais de 30 dias"
+            {...(semLeitura ? TOM_NEUTRO : nc.scansDesatualizados > 0 ? TOM_LARANJA : leituraParcial ? TOM_NEUTRO : TOM_VERDE)}
+            onClick={onJumpToStaleTables}
+          />
+          <KpiTile
+            testId="rc18-kpi-lacunas-governanca"
+            label="Lacunas de governança"
+            value={govSemVerificacao ? null : nc.lacunasGovernanca}
+            sublabel={`Tabelas sem contato, sem origem ou com colunas sem descrição${
+              !semLeitura && govNaoVerificada > 0 ? ` · ${govNaoVerificada} não verificada(s)` : ''
+            }`}
+            {...(nc.lacunasGovernanca > 0
+              ? TOM_LARANJA
+              : semLeitura || leituraParcial || govNaoVerificada > 0
+              ? TOM_NEUTRO
+              : TOM_VERDE)}
+            onClick={onJumpToGovernanceGaps}
+          />
+        </Box>
       </Box>
+
+      {escopo.tabelas.length === 0 && (
+        <Alert severity="warning" sx={{ borderRadius: '10px' }}>
+          {escopoVazioTexto(escopo)}
+        </Alert>
+      )}
+
+      {regrasSemMapeamento.length > 0 && (
+        <Alert severity="info" sx={{ borderRadius: '10px' }}>
+          Regras com dimensão de DataScan sem correspondência (fora dos cartões, incluídas na aba de regras):{' '}
+          {regrasSemMapeamento.map((r) => `${r.dqDimension} (${r.quantidade})`).join(', ')}.
+        </Alert>
+      )}
+
+      {/* Seção 1: Qualidade dos dados (8 dimensões) */}
+      <Box component="section" aria-labelledby="rc18-titulo-dados">
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', mb: '10px', flexWrap: 'wrap', gap: '8px' }}>
+          <Typography
+            id="rc18-titulo-dados"
+            component="h2"
+            sx={{
+              fontFamily: '"Google Sans", sans-serif',
+              fontSize: '15px',
+              fontWeight: 500,
+              color: '#1F1F1F',
+            }}
+          >
+            Qualidade dos dados ({dataDimensions.length})
+          </Typography>
+          <Typography sx={{ fontSize: '12px', color: '#575757' }}>
+            Controles sobre registros, prazos, revisões e integridade
+          </Typography>
+        </Box>
+        <Box data-testid="rc18-dimensoes-dados" sx={gridSx}>
+          {dataDimensions.map((d) => (
+            <DimensionCard
+              key={d.id}
+              dimension={d}
+              onShowRules={onShowDimensionRules}
+              onOpenDetails={setSelectedDimension}
+            />
+          ))}
+        </Box>
+      </Box>
+
+      {/* Seção 2: Governança no catálogo (4 dimensões) */}
+      <Box component="section" id="rc18-secao-governanca" aria-labelledby="rc18-titulo-governanca">
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', mb: '10px', flexWrap: 'wrap', gap: '8px' }}>
+          <Typography
+            id="rc18-titulo-governanca"
+            component="h2"
+            sx={{
+              fontFamily: '"Google Sans", sans-serif',
+              fontSize: '15px',
+              fontWeight: 500,
+              color: '#1F1F1F',
+            }}
+          >
+            Governança no catálogo ({governanceDimensions.length})
+          </Typography>
+          <Typography sx={{ fontSize: '12px', color: '#575757' }}>
+            Contatos, dicionário de dados, linhagem e uso no Knowledge Catalog
+          </Typography>
+        </Box>
+        <Box data-testid="rc18-dimensoes-governanca" sx={gridSx}>
+          {governanceDimensions.map((d) => (
+            <DimensionCard
+              key={d.id}
+              dimension={d}
+              onShowRules={onShowDimensionRules}
+              onOpenDetails={setSelectedDimension}
+            />
+          ))}
+        </Box>
+      </Box>
+
+      <RC18DimensionDrawer
+        dimension={selectedDimension}
+        onClose={() => setSelectedDimension(null)}
+        onShowRules={onShowDimensionRules}
+        escopoLido={escopoLido}
+      />
     </Box>
   );
 };

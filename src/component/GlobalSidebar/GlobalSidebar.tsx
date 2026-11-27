@@ -124,7 +124,8 @@ const GlobalSidebar: React.FC = () => {
 
         <SidebarMenuItem
           icon={<span className="material-symbols-outlined" style={{ fontSize: '24px' }}>dashboard</span>}
-          label="Painel"
+          label="Qualidade RC 18"
+          multiLine
           isActive={isRC18Active}
           onClick={() => navigate('/rc18-dashboard')}
         />

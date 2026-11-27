@@ -31,8 +31,8 @@ tabelas reais.
 | XII | Tempestividade | Dataplex: regras com dimensão `FRESHNESS` | Regras aprovadas |
 
 A regra entra na dimensão pelo campo `dimension`. As dimensões personalizadas usam o nome da dimensão
-da Resolução em maiúsculas e sem acento. Na visão **Qualidade por tabela** o painel lista cada regra
-com o nome, a descrição e o resultado.
+da Resolução em maiúsculas e sem acento. Na aba **Não conformidades e regras** → **Regras**, o painel lista
+cada regra com o nome, a descrição e o resultado.
 
 ## O que o kit cria
 
@@ -61,7 +61,8 @@ Variáveis opcionais: `BQ_LOCATION` (padrão `US`), `DATAPLEX_LOCATION` (padrão
 `GLOSSARY_LOCATION` (padrão `global`) e `PREFIX` (padrão `rc18_demo`).
 
 O script só cria e atualiza: não apaga nada e pode ser executado de novo. Depois, abra o painel e
-clique em **Consultar**. A origem da tabela na visão de rastreabilidade aparece alguns minutos depois.
+clique em **Atualizar**. A origem registrada da tabela (cartão Rastreabilidade e etiqueta **Linhagem** na
+aba *Não conformidades e regras* → *Tabelas*) aparece alguns minutos depois.
 
 ## Resultado esperado
 

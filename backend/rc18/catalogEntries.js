@@ -1,51 +1,30 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 'use strict';
 
 /**
- * Leitura das entradas do Knowledge Catalog (resposta de GetEntry). Funções puras.
+ * Leitura das entradas do Knowledge Catalog (resposta REST de GetEntry). Funções puras.
  *
- * Os aspectos de sistema têm chave `<número do projeto dataplex-types>.global.<tipo>`. Os tipos
- * usados aqui existem em `projects/dataplex-types/locations/global/aspectTypes`:
- *   - contacts               -> identities[] { role, name, id }
- *   - overview               -> content, links[]
- *   - usage                  -> metrics[] { name, timeSeries[] { interval, value } }, refreshTime
- *   - data-quality-scorecard -> score, status, dimensions[]
- * Os vínculos com termos de glossário não são aspectos: vêm de `lookupEntryLinks`.
- * (O aspecto `refresh-cadence` não é lido: ele descreve garantias de produtos de dados, e o
- * escopo deste painel são tabelas.)
+ * Os aspectos de sistema têm chave `<número do projeto dataplex-types>.global.<tipo>`:
+ *   - contacts -> identities[] { role, name, id }
+ *   - overview -> content, links[]
+ *   - usage    -> metrics[] { name, timeSeries[] { interval, value } }
+ * Os vínculos com termos de glossário vêm de `lookupEntryLinks`.
  *
  * Nada é presumido: aspecto ausente ou vazio vira contagem zero ou `null`.
  */
-
-/** Desembrulha google.protobuf.Struct/Value (formato gRPC) em objetos JS simples. */
-function normalizeStructValue(value) {
-  if (value === null || value === undefined) return value;
-  if (Array.isArray(value)) return value.map(normalizeStructValue);
-  if (typeof value !== 'object') return value;
-  if ('kind' in value) {
-    switch (value.kind) {
-      case 'stringValue':
-        return value.stringValue;
-      case 'numberValue':
-        return value.numberValue;
-      case 'boolValue':
-        return value.boolValue;
-      case 'nullValue':
-        return null;
-      case 'listValue':
-        return ((value.listValue && value.listValue.values) || []).map(normalizeStructValue);
-      case 'structValue':
-        return normalizeStructValue((value.structValue && value.structValue.fields) || {});
-      default:
-        return value;
-    }
-  }
-  if (value.fields && typeof value.fields === 'object' && Object.keys(value).length === 1) {
-    return normalizeStructValue(value.fields);
-  }
-  const out = {};
-  for (const key of Object.keys(value)) out[key] = normalizeStructValue(value[key]);
-  return out;
-}
 
 /**
  * Dados do aspecto global de tipo `typeId`, já como objeto JS simples.
@@ -56,14 +35,8 @@ function aspectData(entry, typeId) {
   if (!aspects || typeof aspects !== 'object') return undefined;
   const key = Object.keys(aspects).find((k) => k.endsWith(`.global.${typeId}`));
   if (!key || !aspects[key]) return undefined;
-  const data = normalizeStructValue(aspects[key].data);
+  const data = aspects[key].data;
   return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
-}
-
-function scorecardFromEntry(entry) {
-  const data = aspectData(entry, 'data-quality-scorecard');
-  if (!data || typeof data.score !== 'number') return null;
-  return { score: data.score, status: typeof data.status === 'string' ? data.status : null };
 }
 
 /** Fatos de contexto de negócio registrados na entrada (contatos, documentação e uso). */
@@ -86,42 +59,28 @@ function catalogFactsFromEntry(entry) {
     if (Number.isFinite(value)) queries30d = value;
   }
 
-  return {
-    contactsCount,
-    hasOverview,
-    queries30d,
-    usageRefreshTime: usage && typeof usage.refreshTime === 'string' ? usage.refreshTime : null,
-  };
+  return { contactsCount, hasOverview, queries30d };
 }
 
 /**
  * Vínculos de definição (tipo `definition`) entre a entrada de uma tabela e termos de glossário,
- * a partir da resposta de `lookupEntryLinks`. Um vínculo liga a tabela — ou uma coluna, quando a
- * referência de origem traz `path: "Schema.<coluna>"` — a um termo.
- * `truncated` indica que a API tinha mais páginas além da que foi lida.
+ * a partir da resposta de `lookupEntryLinks`.
+ * `truncated` indica que a API tinha mais páginas além das lidas ou ocorreu erro parcial.
  */
 function glossaryFactsFromLinks(response) {
   const links = (response && Array.isArray(response.entryLinks) ? response.entryLinks : []).filter((l) =>
     /\/entryLinkTypes\/definition$/.test(String((l && l.entryLinkType) || ''))
   );
   const terms = new Set();
-  const columns = new Set();
-  let tableLevel = false;
   for (const link of links) {
     const refs = Array.isArray(link.entryReferences) ? link.entryReferences : [];
     const target = refs.find((r) => r && r.type === 'TARGET');
-    const source = refs.find((r) => r && r.type === 'SOURCE');
     const term = /\/terms\/([^/]+)$/.exec(String((target && target.name) || ''));
     if (term) terms.add(term[1]);
-    const column = /^Schema\.(.+)$/.exec(String((source && source.path) || ''));
-    if (column) columns.add(column[1]);
-    else if (source) tableLevel = true;
   }
   return {
     termLinks: links.length,
     terms: [...terms].sort(),
-    columns: [...columns].sort(),
-    tableLevel,
     truncated: !!(response && response.nextPageToken),
   };
 }
@@ -133,19 +92,12 @@ function catalogItemFromEntry(base, entry, { entryName, entryLocation }) {
     found: true,
     entryName,
     entryLocation,
-    displayName: (entry && entry.entrySource && entry.entrySource.displayName) || base.key,
-    aspectTypes: Object.keys((entry && entry.aspects) || {})
-      .map((k) => k.split('.').pop())
-      .sort(),
-    scorecard: scorecardFromEntry(entry),
     facts: catalogFactsFromEntry(entry),
   };
 }
 
 module.exports = {
-  normalizeStructValue,
   aspectData,
-  scorecardFromEntry,
   catalogFactsFromEntry,
   glossaryFactsFromLinks,
   catalogItemFromEntry,

@@ -1,11 +1,24 @@
 #!/usr/bin/env bash
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 #
 # deploy-gcp.sh — instalador interativo para o Cloud Run.
 # Knowledge Catalog Business Interface (base upstream v1.4.4) + painel RC 18.
 #
 # O que este script cria/alterna no projeto informado:
 #   - habilita APIs (Cloud Run, Cloud Build, Artifact Registry, Resource Manager, BigQuery,
-#     Dataplex, Data Lineage, Sensitive Data Protection);
+#     Dataplex, Data Lineage);
 #   - cria um repositório no Artifact Registry e uma conta de serviço dedicada para o runtime;
 #   - constrói a imagem (Cloud Build) e publica um serviço Cloud Run.
 #
@@ -111,7 +124,6 @@ gcloud services enable \
   bigquery.googleapis.com \
   dataplex.googleapis.com \
   datalineage.googleapis.com \
-  dlp.googleapis.com \
   --project="$PROJECT_ID"
 
 echo ""
@@ -132,8 +144,7 @@ if [ "$IS_SA" = "true" ]; then
     roles/dataplex.viewer \
     roles/dataplex.dataScanDataViewer \
     roles/bigquery.metadataViewer \
-    roles/datalineage.viewer \
-    roles/dlp.tableDataProfilesReader; do
+    roles/datalineage.viewer; do
     echo "  concedendo $ROLE"
     gcloud projects add-iam-policy-binding "$PROJECT_ID" \
       --member="serviceAccount:${SA_EMAIL}" \
